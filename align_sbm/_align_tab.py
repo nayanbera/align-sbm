@@ -1,12 +1,13 @@
-"""Alignment runner tab — controls, live log, and scan plot."""
+"""Alignment runner tab — controls, live log, and per-motor scan plots."""
 import numpy as np
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QGroupBox, QCheckBox, QPushButton, QLabel,
     QProgressBar, QPlainTextEdit, QListWidget, QListWidgetItem,
+    QTabWidget,
 )
 from .smart_scan_functions import ScanStatus
 
@@ -16,35 +17,58 @@ try:
 except ImportError:
     _PG = False
 
+_MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2"]
+
+_POINT_COLOR = "#4fc3f7"
+_FIT_COLOR   = "#ef5350"
+_PEAK_COLOR  = "#ffa726"
+_BG_COLOR    = "#1a1a2e"
+
 
 class AlignTab(QWidget):
     status_message = pyqtSignal(str)
 
     def __init__(self, setup_tab, energy_tab, parent=None):
         super().__init__(parent)
-        self._setup_tab = setup_tab
-        self._energy_tab = energy_tab
-        self._worker = None
+        self._setup_tab    = setup_tab
+        self._energy_tab   = energy_tab
+        self._worker       = None
+
+        # Live-point accumulation for the currently active scan
+        self._current_tab  = "BRG2"
+        self._live_xs: list = []
+        self._live_ys: list = []
+
+        # Per-motor pyqtgraph items (populated in _build_right_panel)
+        self._plot_widgets: dict = {}
+        self._data_items:   dict = {}
+        self._fit_items:    dict = {}
+        self._peak_lines:   dict = {}
+
+        # Demo animation state
+        self._demo_timer   = None
+        self._demo_pts     = []
+        self._demo_result  = None
+        self._demo_idx     = 0
+
         self._build_ui()
 
     def _build_ui(self):
         root = QHBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter)
-
         splitter.addWidget(self._build_controls())
         splitter.addWidget(self._build_right_panel())
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
 
-    # ── Left: controls panel ─────────────────────────────────────────────────
+    # ── Left: controls ───────────────────────────────────────────────────────
 
     def _build_controls(self):
         panel = QWidget()
         vbox = QVBoxLayout(panel)
         vbox.setSpacing(8)
 
-        # Mode
         mode_grp = QGroupBox("Mode")
         mv = QVBoxLayout(mode_grp)
         self._sim_cb = QCheckBox("Simulation (no EPICS)")
@@ -55,7 +79,6 @@ class AlignTab(QWidget):
         mv.addWidget(self._sim_cb)
         vbox.addWidget(mode_grp)
 
-        # Energy rows
         energy_grp = QGroupBox("Energy rows to align")
         ev = QVBoxLayout(energy_grp)
         self._row_list = QListWidget()
@@ -63,26 +86,25 @@ class AlignTab(QWidget):
         self._row_list.setMaximumHeight(180)
         ev.addWidget(self._row_list)
         row_btns = QHBoxLayout()
-        sel_all = QPushButton("All")
-        sel_all.clicked.connect(self._select_all_rows)
-        sel_none = QPushButton("None")
-        sel_none.clicked.connect(self._select_no_rows)
-        sel_refresh = QPushButton("Refresh")
-        sel_refresh.clicked.connect(self._refresh_row_list)
-        sel_refresh.setToolTip("Reload from Energy Table tab")
-        row_btns.addWidget(sel_all)
-        row_btns.addWidget(sel_none)
-        row_btns.addWidget(sel_refresh)
+        for label, slot in [("All",  self._select_all_rows),
+                             ("None", self._select_no_rows),
+                             ("Refresh", self._refresh_row_list)]:
+            btn = QPushButton(label)
+            btn.clicked.connect(slot)
+            if label == "Refresh":
+                btn.setToolTip("Reload from Energy Table tab")
+            row_btns.addWidget(btn)
         ev.addLayout(row_btns)
         vbox.addWidget(energy_grp)
 
-        # Run buttons
         run_grp = QGroupBox("Run")
         rv = QVBoxLayout(run_grp)
+
         self._start_btn = QPushButton("Start Alignment")
         self._start_btn.setMinimumHeight(36)
         self._start_btn.setStyleSheet(
-            "QPushButton { background-color: #2e7d32; color: white; font-weight: bold; border-radius: 4px; }"
+            "QPushButton { background-color: #2e7d32; color: white;"
+            " font-weight: bold; border-radius: 4px; }"
             "QPushButton:hover { background-color: #43a047; }"
             "QPushButton:disabled { background-color: #555; color: #999; }"
         )
@@ -100,9 +122,10 @@ class AlignTab(QWidget):
         self._abort_btn.clicked.connect(self._abort_alignment)
         rv.addWidget(self._abort_btn)
 
-        # Demo scan (shows plot widget without running full alignment)
         demo_btn = QPushButton("Demo Scan (sim)")
-        demo_btn.setToolTip("Run a single simulated scan and display it in the plot")
+        demo_btn.setToolTip(
+            "Run a simulated BRG2 scan and animate its data points in the BRG2 tab"
+        )
         demo_btn.clicked.connect(self._demo_scan)
         rv.addWidget(demo_btn)
 
@@ -117,8 +140,6 @@ class AlignTab(QWidget):
         vbox.addWidget(run_grp)
 
         vbox.addStretch()
-
-        # Populate energy rows
         self._refresh_row_list()
         return panel
 
@@ -137,7 +158,7 @@ class AlignTab(QWidget):
     def _select_no_rows(self):
         self._row_list.clearSelection()
 
-    # ── Right: log + plot ────────────────────────────────────────────────────
+    # ── Right: per-motor plot tabs + log ─────────────────────────────────────
 
     def _build_right_panel(self):
         panel = QWidget()
@@ -146,38 +167,45 @@ class AlignTab(QWidget):
 
         right_split = QSplitter(Qt.Orientation.Vertical)
 
-        # Plot
         if _PG:
-            self._plot_widget = pg.PlotWidget(title="Last Scan")
-            self._plot_widget.setLabel("bottom", "Position")
-            self._plot_widget.setLabel("left", "Signal")
-            self._plot_widget.showGrid(x=True, y=True, alpha=0.3)
-            self._plot_widget.setMinimumHeight(200)
-            right_split.addWidget(self._plot_widget)
-            self._data_item = self._plot_widget.plot(
-                [], [], pen=None,
-                symbol="o", symbolSize=7,
-                symbolBrush=pg.mkBrush("#4fc3f7"),
-                symbolPen=pg.mkPen("#4fc3f7"),
-            )
-            self._fit_item = self._plot_widget.plot(
-                [], [], pen=pg.mkPen("#ef5350", width=2)
-            )
-            self._peak_line = pg.InfiniteLine(
-                angle=90, movable=False,
-                pen=pg.mkPen("#ffa726", width=1, style=Qt.PenStyle.DashLine)
-            )
-            self._plot_widget.addItem(self._peak_line)
-        else:
-            placeholder = QLabel("pyqtgraph not installed — install it for live scan plots")
-            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            placeholder.setStyleSheet("color: #888;")
-            right_split.addWidget(placeholder)
-            self._data_item = None
-            self._fit_item = None
-            self._peak_line = None
+            self._plot_tabs = QTabWidget()
+            for name in _MOTOR_TABS:
+                pw = pg.PlotWidget()
+                pw.setBackground(_BG_COLOR)
+                pw.setLabel("bottom", "Position")
+                pw.setLabel("left", "Signal")
+                pw.showGrid(x=True, y=True, alpha=0.25)
+                pw.setMinimumHeight(200)
 
-        # Log
+                data_item = pw.plot(
+                    [], [], pen=None,
+                    symbol="o", symbolSize=7,
+                    symbolBrush=pg.mkBrush(_POINT_COLOR),
+                    symbolPen=pg.mkPen(_POINT_COLOR),
+                )
+                fit_item = pw.plot([], [], pen=pg.mkPen(_FIT_COLOR, width=2))
+                peak_line = pg.InfiniteLine(
+                    angle=90, movable=False,
+                    pen=pg.mkPen(_PEAK_COLOR, width=1,
+                                 style=Qt.PenStyle.DashLine),
+                )
+                pw.addItem(peak_line)
+
+                self._plot_widgets[name] = pw
+                self._data_items[name]   = data_item
+                self._fit_items[name]    = fit_item
+                self._peak_lines[name]   = peak_line
+
+                self._plot_tabs.addTab(pw, name)
+
+            right_split.addWidget(self._plot_tabs)
+        else:
+            lbl = QLabel("pyqtgraph not installed — install it for live scan plots")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet("color: #888;")
+            right_split.addWidget(lbl)
+
+        # Log panel
         log_frame = QWidget()
         lv = QVBoxLayout(log_frame)
         lv.setContentsMargins(0, 0, 0, 0)
@@ -224,7 +252,7 @@ class AlignTab(QWidget):
             return
 
         simulate = self._sim_cb.isChecked()
-        kwargs = self._setup_tab.get_kwargs()
+        kwargs   = self._setup_tab.get_kwargs()
 
         self._log.appendPlainText(
             f"\n{'═'*60}\n"
@@ -236,6 +264,8 @@ class AlignTab(QWidget):
         from ._worker import AlignWorker
         self._worker = AlignWorker(rows, kwargs, simulate, parent=self)
         self._worker.log_chunk.connect(self._on_log)
+        self._worker.scan_started.connect(self._on_scan_started)
+        self._worker.point_measured.connect(self._on_point_measured)
         self._worker.scan_finished.connect(self._on_scan_finished)
         self._worker.done.connect(self._on_done)
         self._worker.error.connect(self._on_error)
@@ -245,7 +275,6 @@ class AlignTab(QWidget):
         self._progress.setVisible(True)
         self._status_lbl.setText("Running…")
         self.status_message.emit("Alignment running…")
-
         self._worker.start()
 
     def _abort_alignment(self):
@@ -264,47 +293,84 @@ class AlignTab(QWidget):
     # ── Worker signal handlers ────────────────────────────────────────────────
 
     def _on_log(self, text):
-        # Append without extra newline (text already has \n)
         cursor = self._log.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         cursor.insertText(text)
         self._log.setTextCursor(cursor)
         self._log.ensureCursorVisible()
 
-    def _on_scan_finished(self, result):
-        if not _PG or self._data_item is None:
+    def _on_scan_started(self, tab_name: str):
+        """Switch to the named motor tab and clear its plot for a new scan."""
+        self._current_tab = tab_name
+        self._live_xs = []
+        self._live_ys = []
+        if not _PG or tab_name not in self._data_items:
             return
-        if result.status != ScanStatus.SUCCESS:
-            return
-        self._update_plot(result)
+        idx = _MOTOR_TABS.index(tab_name) if tab_name in _MOTOR_TABS else 0
+        self._plot_tabs.setCurrentIndex(idx)
+        self._data_items[tab_name].setData([], [])
+        self._fit_items[tab_name].setData([], [])
+        self._peak_lines[tab_name].setValue(0)
+        self._plot_widgets[tab_name].setTitle(f"{tab_name} — scanning…")
 
-    def _update_plot(self, result):
-        if not _PG or self._data_item is None:
+    def _on_point_measured(self, x: float, y: float):
+        """Append one live data point to the currently active plot tab."""
+        self._live_xs.append(x)
+        self._live_ys.append(y)
+        if not _PG or self._current_tab not in self._data_items:
+            return
+        self._data_items[self._current_tab].setData(
+            np.array(self._live_xs, dtype=float),
+            np.array(self._live_ys, dtype=float),
+        )
+
+    def _on_scan_finished(self, result):
+        """Overlay the fit curve on the current tab after a scan completes."""
+        if not _PG:
+            return
+        tab = self._current_tab
+        status_str = result.status.value if hasattr(result.status, "value") else str(result.status)
+        if result.status == ScanStatus.SUCCESS:
+            self._draw_fit(tab, result)
+        if tab in self._plot_widgets:
+            self._plot_widgets[tab].setTitle(f"{tab} — {status_str}")
+
+    def _draw_fit(self, tab_name: str, result):
+        if tab_name not in self._fit_items:
             return
         pos = np.asarray(result.positions, dtype=float)
-        sig = np.asarray(result.signals, dtype=float)
-        self._data_item.setData(pos, sig)
+        sig = np.asarray(result.signals,   dtype=float)
+        self._data_items[tab_name].setData(pos, sig)
 
-        if result.center is not None and result.sigma is not None and result.amplitude is not None:
+        if (result.center is not None
+                and result.sigma is not None
+                and result.amplitude is not None):
             xs = np.linspace(pos.min(), pos.max(), 300)
             offset = result.offset or 0.0
             if result.profile == "lorentzian":
                 gamma = result.sigma * np.sqrt(2 * np.log(2))
                 ys = result.amplitude / (1 + ((xs - result.center) / gamma) ** 2) + offset
             else:
-                ys = result.amplitude * np.exp(
-                    -0.5 * ((xs - result.center) / result.sigma) ** 2
-                ) + offset
-            self._fit_item.setData(xs, ys)
-            self._peak_line.setValue(result.center)
+                ys = (result.amplitude
+                      * np.exp(-0.5 * ((xs - result.center) / result.sigma) ** 2)
+                      + offset)
+            self._fit_items[tab_name].setData(xs, ys)
+            self._peak_lines[tab_name].setValue(result.center)
         else:
-            self._fit_item.setData([], [])
+            self._fit_items[tab_name].setData([], [])
+
+    # ── Demo scan ────────────────────────────────────────────────────────────
 
     def _demo_scan(self):
+        """Run a simulated BRG2 scan, then animate its points in the BRG2 tab."""
+        if self._demo_timer and self._demo_timer.isActive():
+            return  # already animating
+
         from .smart_scan_functions import smart_scan
         kwargs = self._setup_tab.get_kwargs()
         center = (kwargs.get("brg2_start", -0.005) + kwargs.get("brg2_stop", 0.005)) / 2
-        half = abs(kwargs.get("brg2_stop", 0.005) - kwargs.get("brg2_start", -0.005)) / 2
+        half   = abs(kwargs.get("brg2_stop", 0.005) - kwargs.get("brg2_start", -0.005)) / 2
+
         result = smart_scan(
             "demo_motor", "demo_det",
             start=center - half, stop=center + half,
@@ -314,12 +380,41 @@ class AlignTab(QWidget):
             sim_amplitude=1000, sim_noise=15,
             plot=False, fine_scan=True, move_to_peak=False,
         )
-        if result.status == ScanStatus.SUCCESS:
-            self._update_plot(result)
+        if result.status != ScanStatus.SUCCESS:
             self._log.appendPlainText(
-                f"[Demo] smart_scan: status={result.status.value}, "
-                f"center={result.center:.5g}, sigma={result.sigma:.5g}"
+                f"[Demo] scan failed: {result.status.value}"
             )
+            return
+
+        # Clear the BRG2 tab and animate the points one by one
+        self._on_scan_started("BRG2")
+        self._demo_pts    = list(zip(result.positions, result.signals))
+        self._demo_result = result
+        self._demo_idx    = 0
+
+        self._demo_timer = QTimer(self)
+        self._demo_timer.timeout.connect(self._demo_tick)
+        self._demo_timer.start(60)   # ~60 ms per point → visually smooth
+
+    def _demo_tick(self):
+        if self._demo_idx < len(self._demo_pts):
+            x, y = self._demo_pts[self._demo_idx]
+            self._on_point_measured(x, y)
+            self._demo_idx += 1
+        else:
+            self._demo_timer.stop()
+            self._draw_fit("BRG2", self._demo_result)
+            r = self._demo_result
+            if _PG and "BRG2" in self._plot_widgets:
+                self._plot_widgets["BRG2"].setTitle(
+                    f"BRG2 — Demo  center={r.center:.5g}  σ={r.sigma:.5g}"
+                )
+            self._log.appendPlainText(
+                f"[Demo] center={r.center:.5g}, sigma={r.sigma:.5g}, "
+                f"amplitude={r.amplitude:.5g}"
+            )
+
+    # ── Completion / error ────────────────────────────────────────────────────
 
     def _on_done(self, results):
         self._log.appendPlainText(

@@ -1,6 +1,7 @@
 """Background worker thread for running alignment scans."""
 import contextlib
 import io
+import time
 import traceback
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -23,37 +24,87 @@ class _LogStream(io.TextIOBase):
 
 
 class AlignWorker(QThread):
-    log_chunk = pyqtSignal(str)
-    scan_finished = pyqtSignal(object)   # ScanResult after each scan
-    step_started = pyqtSignal(str)       # step label
-    done = pyqtSignal(list)              # final results list
-    error = pyqtSignal(str)              # traceback string
+    log_chunk      = pyqtSignal(str)
+    scan_started   = pyqtSignal(str)            # tab name: BRG2 / Pitch / Roll2 / X2
+    point_measured = pyqtSignal(float, float)   # (x, y) live data point
+    scan_finished  = pyqtSignal(object)         # ScanResult after each scan completes
+    done           = pyqtSignal(list)           # final results list
+    error          = pyqtSignal(str)            # traceback string
 
     def __init__(self, table, kwargs, simulate, parent=None):
         super().__init__(parent)
-        self._table = table
-        self._kwargs = kwargs
+        self._table    = table
+        self._kwargs   = kwargs
         self._simulate = simulate
+
+    def _tab_for_motor(self, motor):
+        from .smart_scan_functions import PVAxis
+        if isinstance(motor, PVAxis):
+            return "Pitch"
+        label = str(motor)
+        for tab, key in [("BRG2", "brg2"), ("Roll2", "roll2_motor"), ("X2", "x2_motor")]:
+            pv = self._kwargs.get(key, "")
+            if pv and label == pv:
+                return tab
+        return "BRG2"
 
     def run(self):
         from . import smart_scan_functions as _m
 
-        # Wrap smart_scan and fly_scan to emit per-scan results
-        orig_ss = _m.smart_scan
-        orig_fs = _m.fly_scan
+        worker = self
 
-        def _patched_smart_scan(*a, **kw):
-            res = orig_ss(*a, **kw)
-            self.scan_finished.emit(res)
-            return res
+        orig_ss          = _m.smart_scan
+        orig_fs          = _m.fly_scan
+        orig_if_read     = _m._Interface.read
+        orig_sample_loop = _m._sample_loop
 
-        def _patched_fly_scan(*a, **kw):
-            res = orig_fs(*a, **kw)
-            self.scan_finished.emit(res)
-            return res
+        # Patch _Interface.read to emit one point per smart_scan step.
+        # _pos is always set by _Interface.move() just before read() is called.
+        def _if_read_emit(iface_self):
+            sig = orig_if_read(iface_self)
+            worker.point_measured.emit(float(iface_self._pos), float(sig))
+            return sig
 
-        _m.smart_scan = _patched_smart_scan
-        _m.fly_scan = _patched_fly_scan
+        # Patch _sample_loop to emit one point per fly_scan sample.
+        # Mirrors the original loop exactly, adding only the signal emit.
+        def _sample_loop_emit(iface, sample_interval, pos_list, sig_list,
+                               stop_event, verbose):
+            while not stop_event.is_set():
+                t_next = time.monotonic() + sample_interval
+                p = iface.read_position()
+                s = iface.read_detector()
+                pos_list.append(p)
+                sig_list.append(s)
+                worker.point_measured.emit(float(p), float(s))
+                if verbose:
+                    print(f"  pos={p:>13.8g}   signal={s:>14.5g}")
+                remaining = t_next - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
+
+        def _patched_ss(motor, det, start, stop, *args, **kw):
+            tab = worker._tab_for_motor(motor)
+            worker.scan_started.emit(tab)
+            _m._Interface.read = _if_read_emit
+            try:
+                result = orig_ss(motor, det, start, stop, *args, **kw)
+            finally:
+                _m._Interface.read = orig_if_read
+            worker.scan_finished.emit(result)
+            return result
+
+        def _patched_fs(motor, det, start, stop, *args, **kw):
+            worker.scan_started.emit("Pitch")
+            _m._sample_loop = _sample_loop_emit
+            try:
+                result = orig_fs(motor, det, start, stop, *args, **kw)
+            finally:
+                _m._sample_loop = orig_sample_loop
+            worker.scan_finished.emit(result)
+            return result
+
+        _m.smart_scan = _patched_ss
+        _m.fly_scan   = _patched_fs
 
         stream = _LogStream(self.log_chunk)
         try:
@@ -70,5 +121,7 @@ class AlignWorker(QThread):
         except Exception:
             self.error.emit(traceback.format_exc())
         finally:
-            _m.smart_scan = orig_ss
-            _m.fly_scan = orig_fs
+            _m.smart_scan      = orig_ss
+            _m.fly_scan        = orig_fs
+            _m._Interface.read = orig_if_read
+            _m._sample_loop    = orig_sample_loop
