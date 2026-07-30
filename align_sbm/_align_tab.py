@@ -157,19 +157,32 @@ class AlignTab(QWidget):
 
         loop_row = QHBoxLayout()
         self._loop_cb = QCheckBox("Loop")
-        self._loop_cb.setToolTip("Repeat the alignment over the selected rows multiple times")
+        self._loop_cb.setToolTip("Repeat the full alignment sequence multiple times")
         loop_row.addWidget(self._loop_cb)
         loop_row.addWidget(QLabel("Iterations:"))
         self._loop_iter_edit = QLineEdit("0")
         self._loop_iter_edit.setFixedWidth(48)
         self._loop_iter_edit.setValidator(QIntValidator(0, 9999, self))
         self._loop_iter_edit.setEnabled(False)
-        self._loop_iter_edit.setToolTip("Number of times to repeat (0 = run until Abort)")
+        self._loop_iter_edit.setToolTip("Number of full-sequence repetitions (0 = run until Abort)")
         self._loop_cb.toggled.connect(self._loop_iter_edit.setEnabled)
         loop_row.addWidget(self._loop_iter_edit)
         loop_row.addWidget(QLabel("(0 = ∞)"))
         loop_row.addStretch()
         rv.addLayout(loop_row)
+
+        per_e_row = QHBoxLayout()
+        per_e_row.addWidget(QLabel("Repeats per energy:"))
+        self._per_e_edit = QLineEdit("1")
+        self._per_e_edit.setFixedWidth(48)
+        self._per_e_edit.setValidator(QIntValidator(1, 999, self))
+        self._per_e_edit.setToolTip(
+            "How many times to align each energy before moving to the next.\n"
+            "E.g. 3 → [E1, E1, E1, E2, E2, E2, …]"
+        )
+        per_e_row.addWidget(self._per_e_edit)
+        per_e_row.addStretch()
+        rv.addLayout(per_e_row)
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
@@ -531,11 +544,19 @@ class AlignTab(QWidget):
         self._csv_path_lbl.setText(self._csv_path)
         self._save_csv_path()
 
+        # Per-energy repeat: expand row list before passing to worker
+        try:
+            per_e = max(1, int(self._per_e_edit.text()))
+        except ValueError:
+            per_e = 1
+        self._per_e_repeat = per_e
+        expanded = [row for row in rows for _ in range(per_e)]
+
         # Loop state
         self._loop_active   = self._loop_cb.isChecked()
         self._loop_abort    = False
         self._loop_count    = 0
-        self._loop_rows     = rows
+        self._loop_rows     = expanded
         self._loop_kwargs   = kwargs
         self._loop_simulate = simulate
         try:
@@ -551,15 +572,18 @@ class AlignTab(QWidget):
         self._launch_worker()
 
     def _log_loop_header(self, iteration: int):
-        simulate = self._loop_simulate
-        rows     = self._loop_rows
-        total    = str(self._loop_max) if self._loop_max > 0 else "∞"
-        iter_str = f"  Loop {iteration}/{total}\n" if self._loop_active else ""
+        simulate   = self._loop_simulate
+        n_unique   = len(self._loop_rows) // max(self._per_e_repeat, 1)
+        total      = str(self._loop_max) if self._loop_max > 0 else "∞"
+        iter_str   = f"  Loop {iteration}/{total}\n" if self._loop_active else ""
+        repeat_str = (f"  {self._per_e_repeat} repeat(s) per energy\n"
+                      if self._per_e_repeat > 1 else "")
         self._log.appendPlainText(
             f"\n{'═'*60}\n"
             f"  Starting alignment  {'[SIMULATION]' if simulate else '[EPICS]'}\n"
             f"{iter_str}"
-            f"  {len(rows)} energy row(s) selected\n"
+            f"  {n_unique} energy row(s) selected\n"
+            f"{repeat_str}"
             f"{'═'*60}"
         )
 
