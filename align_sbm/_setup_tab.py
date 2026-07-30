@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox,
     QComboBox, QPushButton, QLabel, QTabWidget,
+    QTableWidget, QTableWidgetItem, QHeaderView,
 )
 
 # ── Default PV names (ID15A2 prefix) ────────────────────────────────────────
@@ -57,6 +58,7 @@ _SCAN_DEFAULTS = {
     # Other
     "settle":           0.3,
     "energy_settle":    2.0,
+    "record_settle":    2.0,
     "do_pitch_scan":   True,
     "peak_method":     "stats",
     "stats_centre":    "centroid",
@@ -331,10 +333,64 @@ class SetupTab(QWidget):
         self._scan_widgets["filename"] = filename_w
         of.addRow("Output CSV:", filename_w)
 
+        r_settle_w = _dbl(_SCAN_DEFAULTS["record_settle"], lo=0.0, hi=60.0, decimals=1, step=0.5)
+        self._scan_widgets["record_settle"] = r_settle_w
+        of.addRow("Record settle (s):", r_settle_w)
+
         vbox.addWidget(other_grp)
+
+        # Post-Alignment Recording
+        rec_grp = QGroupBox("Post-Alignment Recording")
+        rec_grp.setToolTip(
+            "PVs read after each energy row's alignment and appended as extra CSV columns."
+        )
+        rv = QVBoxLayout(rec_grp)
+
+        info = QLabel(
+            "Extra PVs to read after each energy alignment and save to the CSV output.\n"
+            "Each row adds one column: <b>Label</b> becomes the CSV column header, "
+            "<b>PV Name</b> is the EPICS PV to read."
+        )
+        info.setWordWrap(True)
+        rv.addWidget(info)
+
+        self._record_table = QTableWidget(0, 2)
+        self._record_table.setHorizontalHeaderLabels(["Label (CSV column)", "PV Name"])
+        self._record_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._record_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._record_table.setMaximumHeight(160)
+        rv.addWidget(self._record_table)
+
+        rec_btns = QHBoxLayout()
+        add_btn = QPushButton("Add PV")
+        add_btn.clicked.connect(self._add_record_row)
+        rem_btn = QPushButton("Remove")
+        rem_btn.clicked.connect(self._remove_record_row)
+        rec_btns.addWidget(add_btn)
+        rec_btns.addWidget(rem_btn)
+        rec_btns.addStretch()
+        rv.addLayout(rec_btns)
+
+        vbox.addWidget(rec_grp)
         vbox.addStretch()
         scroll.setWidget(container)
         return scroll
+
+    def _add_record_row(self, label="", pv=""):
+        r = self._record_table.rowCount()
+        self._record_table.insertRow(r)
+        self._record_table.setItem(r, 0, QTableWidgetItem(label))
+        self._record_table.setItem(r, 1, QTableWidgetItem(pv))
+
+    def _remove_record_row(self):
+        rows = sorted(
+            {idx.row() for idx in self._record_table.selectedIndexes()}, reverse=True
+        )
+        if not rows:
+            rows = [self._record_table.rowCount() - 1]
+        for r in rows:
+            if r >= 0:
+                self._record_table.removeRow(r)
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -356,6 +412,17 @@ class SetupTab(QWidget):
             elif isinstance(w, QLineEdit):
                 kwargs[key] = w.text().strip()
 
+        # Build record_pvs dict from the recording table
+        record_pvs = {}
+        for r in range(self._record_table.rowCount()):
+            lbl_item = self._record_table.item(r, 0)
+            pv_item  = self._record_table.item(r, 1)
+            lbl = lbl_item.text().strip() if lbl_item else ""
+            pv  = pv_item.text().strip()  if pv_item  else ""
+            if lbl and pv:
+                record_pvs[lbl] = pv
+        kwargs["record_pvs"] = record_pvs if record_pvs else None
+
         return kwargs
 
     def save_settings(self):
@@ -372,6 +439,15 @@ class SetupTab(QWidget):
                 self._settings.setValue(f"scan/{key}", w.value())
             elif isinstance(w, QLineEdit):
                 self._settings.setValue(f"scan/{key}", w.text())
+
+        # Save record_pvs table as a list of (label, pv) tuples
+        rows = []
+        for r in range(self._record_table.rowCount()):
+            lbl = (self._record_table.item(r, 0) or QTableWidgetItem()).text().strip()
+            pv  = (self._record_table.item(r, 1) or QTableWidgetItem()).text().strip()
+            if lbl or pv:
+                rows.append((lbl, pv))
+        self._settings.setValue("record_pvs", repr(rows))
 
     def _load_settings(self):
         for key, w in self._pv_widgets.items():
@@ -400,3 +476,14 @@ class SetupTab(QWidget):
                     pass
             elif isinstance(w, QLineEdit):
                 w.setText(str(v))
+
+        # Restore record_pvs table
+        raw = self._settings.value("record_pvs")
+        if raw:
+            try:
+                rows = eval(raw)  # noqa: S307  (trusted local QSettings)
+                self._record_table.setRowCount(0)
+                for lbl, pv in rows:
+                    self._add_record_row(lbl, pv)
+            except Exception:
+                pass
