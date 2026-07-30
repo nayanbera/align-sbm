@@ -394,11 +394,10 @@ class AlignTab(QWidget):
         self._live_ys.append(y)
         if not _PG or self._current_tab not in self._data_items:
             return
-        self._data_items[self._current_tab].setData(
-            np.array(self._live_xs, dtype=float),
-            np.array(self._live_ys, dtype=float),
-        )
-        self._plot_widgets[self._current_tab].getViewBox().autoRange()
+        xs = np.array(self._live_xs, dtype=float)
+        ys = np.array(self._live_ys, dtype=float)
+        self._data_items[self._current_tab].setData(xs, ys)
+        self._fit_to_data(self._plot_widgets[self._current_tab], xs, ys)
 
     def _on_scan_finished(self, result):
         """Overlay the fit curve on the current tab after a scan completes."""
@@ -435,7 +434,19 @@ class AlignTab(QWidget):
         else:
             self._fit_items[tab_name].setData([], [])
         if tab_name in self._plot_widgets:
-            self._plot_widgets[tab_name].getViewBox().autoRange()
+            self._fit_to_data(self._plot_widgets[tab_name], pos, sig)
+
+    @staticmethod
+    def _fit_to_data(pw, xs, ys):
+        """Set x/y range to exactly the data extent with a small padding."""
+        if len(xs) < 1:
+            return
+        xlo, xhi = float(xs.min()), float(xs.max())
+        ylo, yhi = float(ys.min()), float(ys.max())
+        xpad = (xhi - xlo) * 0.12 if xhi > xlo else abs(xlo) * 0.1 + 0.01
+        ypad = (yhi - ylo) * 0.15 if yhi > ylo else abs(ylo) * 0.1 + 0.1
+        pw.setXRange(xlo - xpad, xhi + xpad, padding=0)
+        pw.setYRange(ylo - ypad, yhi + ypad, padding=0)
 
     # ── Demo scan ────────────────────────────────────────────────────────────
 
