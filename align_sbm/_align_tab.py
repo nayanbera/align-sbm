@@ -297,6 +297,14 @@ class AlignTab(QWidget):
         )
         open_csv_btn.clicked.connect(self._open_csv)
         csv_hdr.addWidget(open_csv_btn)
+        del_btn = QPushButton("Delete Row(s)")
+        del_btn.setToolTip("Permanently remove selected rows from the CSV file")
+        del_btn.setStyleSheet(
+            "QPushButton { color: #ef5350; }"
+            "QPushButton:hover { color: #e53935; }"
+        )
+        del_btn.clicked.connect(self._delete_csv_rows)
+        csv_hdr.addWidget(del_btn)
         refresh_btn = QPushButton("Refresh")
         refresh_btn.setMaximumWidth(65)
         refresh_btn.clicked.connect(self._refresh_csv)
@@ -306,6 +314,7 @@ class AlignTab(QWidget):
         self._csv_table = QTableWidget(0, 0)
         self._csv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._csv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._csv_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self._csv_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
         self._csv_table.setFont(
@@ -400,6 +409,46 @@ class AlignTab(QWidget):
         self._csv_table.scrollToBottom()
         self._csv_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
+
+    def _delete_csv_rows(self):
+        """Permanently remove selected rows from the CSV file."""
+        import csv, os
+        selected = sorted({idx.row() for idx in self._csv_table.selectedIndexes()}, reverse=True)
+        if not selected:
+            QMessageBox.information(self, "Delete Rows", "No rows selected.")
+            return
+        path = self._csv_path
+        if not path or not os.path.isfile(path):
+            QMessageBox.warning(self, "Delete Rows", "No CSV file is currently open.")
+            return
+        reply = QMessageBox.question(
+            self, "Delete Rows",
+            f"Permanently delete {len(selected)} row(s) from:\n{path}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            with open(path, newline="") as f:
+                rows = list(csv.reader(f))
+        except Exception as e:
+            QMessageBox.critical(self, "Delete Rows", f"Could not read file:\n{e}")
+            return
+        if not rows:
+            return
+        header = rows[0]
+        data = rows[1:]
+        keep_indices = set(range(len(data))) - set(selected)
+        data_to_keep = [r for i, r in enumerate(data) if i in keep_indices]
+        try:
+            with open(path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                writer.writerows(data_to_keep)
+        except Exception as e:
+            QMessageBox.critical(self, "Delete Rows", f"Could not write file:\n{e}")
+            return
+        self._refresh_csv()
 
     # ── Alignment control ────────────────────────────────────────────────────
 
