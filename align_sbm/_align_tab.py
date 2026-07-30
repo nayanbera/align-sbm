@@ -336,6 +336,13 @@ class AlignTab(QWidget):
         refresh_btn.setMaximumWidth(65)
         refresh_btn.clicked.connect(self._refresh_csv)
         csv_hdr.addWidget(refresh_btn)
+        analyze_btn = QPushButton("Analyze…")
+        analyze_btn.setToolTip(
+            "Open the statistical analysis dialog for the current CSV file:\n"
+            "plots, correlation matrix, per-energy group stats, drift analysis."
+        )
+        analyze_btn.clicked.connect(self._analyze_csv)
+        csv_hdr.addWidget(analyze_btn)
         cv.addLayout(csv_hdr)
 
         self._csv_table = QTableWidget(0, 0)
@@ -491,6 +498,11 @@ class AlignTab(QWidget):
             QMessageBox.critical(self, "Delete Rows", f"Could not write file:\n{e}")
             return
         self._refresh_csv()
+
+    def _analyze_csv(self):
+        from ._stats_dialog import StatsDialog
+        dlg = StatsDialog(csv_path=self._csv_path, parent=self)
+        dlg.exec()
 
     # ── Alignment control ────────────────────────────────────────────────────
 
