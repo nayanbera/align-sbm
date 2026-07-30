@@ -242,17 +242,23 @@ def _try_fit(positions: np.ndarray, signals: np.ndarray,
         raw_w0      = ((above_raw[-1] - above_raw[0]) / 2.0
                        if len(above_raw) > 1 else span / 4.0)
         raw_w0      = max(abs(raw_w0), 1e-9)
-        try:
-            popt, _ = curve_fit(
-                _supergaussian, positions, y,
-                p0=[raw_amp0, raw_center0, raw_w0, 2.0, raw_offset0],
-                bounds=bounds_sg, maxfev=20_000,
-            )
-            # RMS also on raw signal for a fair comparison
-            rms_sg = float(np.sqrt(np.mean((y - _supergaussian(positions, *popt)) ** 2)))
-            results["supergaussian"] = (popt, rms_sg)
-        except (RuntimeError, ValueError):
-            pass
+        # Multi-start: try several p seeds so the solver doesn't get stuck at p≈2
+        _best_sg_popt, _best_sg_rms = None, np.inf
+        for _p_seed in [2.0, 4.0, 8.0, 16.0]:
+            try:
+                _popt, _ = curve_fit(
+                    _supergaussian, positions, y,
+                    p0=[raw_amp0, raw_center0, raw_w0, _p_seed, raw_offset0],
+                    bounds=bounds_sg, maxfev=20_000,
+                )
+                _rms = float(np.sqrt(np.mean((y - _supergaussian(positions, *_popt)) ** 2)))
+                if _rms < _best_sg_rms:
+                    _best_sg_rms  = _rms
+                    _best_sg_popt = _popt
+            except (RuntimeError, ValueError):
+                pass
+        if _best_sg_popt is not None:
+            results["supergaussian"] = (_best_sg_popt, _best_sg_rms)
 
     if not results:
         return False, 0.0, 0.0, 0.0, 0.0, "none"

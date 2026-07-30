@@ -54,6 +54,7 @@ class AlignTab(QWidget):
         self._data_items:   dict = {}
         self._fit_items:    dict = {}
         self._peak_lines:   dict = {}
+        self._param_items:  dict = {}
 
         # Demo animation state
         self._demo_timer   = None
@@ -202,10 +203,19 @@ class AlignTab(QWidget):
                 )
                 pw.addItem(peak_line)
 
+                param_item = pg.TextItem(
+                    text="", anchor=(1.0, 0.0),
+                    color=(210, 210, 210),
+                )
+                param_item.setFont(QFont("Menlo" if "darwin" in __import__("sys").platform
+                                         else "Consolas", 9))
+                pw.addItem(param_item)
+
                 self._plot_widgets[name] = pw
                 self._data_items[name]   = data_item
                 self._fit_items[name]    = fit_item
                 self._peak_lines[name]   = peak_line
+                self._param_items[name]  = param_item
 
                 self._plot_tabs.addTab(pw, name)
 
@@ -386,6 +396,8 @@ class AlignTab(QWidget):
         self._data_items[tab_name].setData([], [])
         self._fit_items[tab_name].setData([], [])
         self._peak_lines[tab_name].setValue(0)
+        if tab_name in self._param_items:
+            self._param_items[tab_name].setText("")
         self._plot_widgets[tab_name].setTitle(f"{tab_name} — scanning…")
 
     def _on_point_measured(self, x: float, y: float):
@@ -413,8 +425,7 @@ class AlignTab(QWidget):
     def _draw_fit(self, tab_name: str, result):
         if tab_name not in self._fit_items:
             return
-        # Keep all accumulated live points (coarse + fine phases) so neither
-        # phase gets dropped when the fit overlay is drawn.
+        # Keep all accumulated live points (coarse + fine phases).
         if self._live_xs:
             pos = np.array(self._live_xs, dtype=float)
             sig = np.array(self._live_ys, dtype=float)
@@ -426,19 +437,48 @@ class AlignTab(QWidget):
         if (result.center is not None
                 and result.sigma is not None
                 and result.amplitude is not None):
-            fit_xs = np.linspace(pos.min(), pos.max(), 300)
+            fit_xs = np.linspace(pos.min(), pos.max(), 400)
             offset = result.offset or 0.0
-            if result.profile == "lorentzian":
-                gamma = result.sigma * np.sqrt(2 * np.log(2))
-                fit_ys = result.amplitude / (1 + ((fit_xs - result.center) / gamma) ** 2) + offset
-            else:
-                fit_ys = (result.amplitude
-                          * np.exp(-0.5 * ((fit_xs - result.center) / result.sigma) ** 2)
-                          + offset)
+            sigma  = result.sigma
+            amp    = result.amplitude
+            cen    = result.center
+            prof   = result.profile or "gaussian"
+
+            if prof == "lorentzian":
+                fit_ys = amp / (1.0 + ((fit_xs - cen) / sigma) ** 2) + offset
+                fwhm   = 2.0 * sigma
+            elif prof == "supergaussian":
+                p = (result.stats.get("supergaussian_p", 2.0)
+                     if result.stats else 2.0)
+                fit_ys = amp * np.exp(-np.abs((fit_xs - cen) / sigma) ** p) + offset
+                fwhm   = 2.0 * sigma * (np.log(2.0) ** (1.0 / p))
+            else:  # gaussian
+                fit_ys = amp * np.exp(-0.5 * ((fit_xs - cen) / sigma) ** 2) + offset
+                fwhm   = 2.3548 * sigma
+
             self._fit_items[tab_name].setData(fit_xs, fit_ys)
-            self._peak_lines[tab_name].setValue(result.center)
+            self._peak_lines[tab_name].setValue(cen)
+
+            # Build parameter annotation
+            lines = [f"Profile : {prof}",
+                     f"Center  : {cen:.6g}",
+                     f"FWHM    : {fwhm:.5g}",
+                     f"Sigma   : {sigma:.5g}",
+                     f"Ampl    : {amp:.5g}",
+                     f"Offset  : {offset:.5g}"]
+            if prof == "supergaussian":
+                p_val = (result.stats.get("supergaussian_p", 2.0)
+                         if result.stats else 2.0)
+                lines.insert(3, f"p (SG)  : {p_val:.3g}")
+            if tab_name in self._param_items:
+                pi = self._param_items[tab_name]
+                pi.setText("\n".join(lines))
+                pi.setPos(float(pos.max()), float(sig.max()))
         else:
             self._fit_items[tab_name].setData([], [])
+            if tab_name in self._param_items:
+                self._param_items[tab_name].setText("")
+
         if tab_name in self._plot_widgets:
             self._fit_to_data(self._plot_widgets[tab_name], pos, sig)
 
