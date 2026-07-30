@@ -2416,6 +2416,7 @@ def align_beamline(
     fine_sigma_range    : float = 3.0,
     fine_nsteps         : int   = 21,
     fine_scan_iter      : int   = 2,
+    backlash_correction : bool  = False,
     plot                : bool  = False,
     simulate            : bool  = False,
     verbose             : bool  = True,
