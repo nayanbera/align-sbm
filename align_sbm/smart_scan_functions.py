@@ -25,6 +25,16 @@ except ImportError:
     warnings.warn("pyepics not found – SIMULATION mode active.", stacklevel=1)
 
 
+def caget(pv_name: str):
+    """Read the current value of an EPICS PV. Returns None if unavailable."""
+    if not _EPICS_AVAILABLE or not isinstance(pv_name, str) or not pv_name.strip():
+        return None
+    try:
+        return epics.caget(pv_name.strip(), timeout=2.0)
+    except Exception:
+        return None
+
+
 # ── Result / status types ────────────────────────────────────────────────────
 
 class ScanStatus(Enum):
@@ -2392,6 +2402,8 @@ def align_beamline(
     simulate            : bool  = False,
     verbose             : bool  = True,
     debug               : bool  = False,
+    step_cb                     = None,
+    row_cb                      = None,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -2575,8 +2587,11 @@ def align_beamline(
             "X2"      : x2_sp,
         }
 
+        r_brg2 = r_pitch = r_roll2 = r_x2 = None
+        _row_ok = True
         try:
             # ── Set energy ────────────────────────────────────────────────────
+            if step_cb: step_cb("Set energy")
             if verbose:
                 print(f"\n  Setting energy …")
             _set_energy_for_row(
@@ -2590,6 +2605,7 @@ def align_beamline(
             )
 
             # ── a) Open slits ─────────────────────────────────────────────────
+            if step_cb: step_cb("Open slits")
             if verbose:
                 print(f"\n  a) Opening slits: V={slit_open_v}  H={slit_open_h}")
             _write_pv(slit_v, slit_open_v, f"slit_v → {slit_open_v}")
@@ -2598,6 +2614,7 @@ def align_beamline(
 
             # ── b) Home pitch piezo ───────────────────────────────────────────
             if do_pitch_scan:
+                if step_cb: step_cb("Home pitch")
                 if verbose:
                     print(f"\n  b) Setting pitch piezo to {pitch_home}")
                 _write_pv(pitch, pitch_home, f"pitch → {pitch_home}")
@@ -2607,6 +2624,7 @@ def align_beamline(
                     print(f"\n  b) Pitch scan disabled – skipping")
 
             # ── c) BRG2 smart_scan → move to peak_pos ────────────────────────
+            if step_cb: step_cb("BRG2 scan")
             if verbose:
                 print(f"\n  c) BRG2 smart_scan  [{brg2_start:+g} … {brg2_stop:+g}  "
                       f"{brg2_nsteps} steps]")
@@ -2635,6 +2653,7 @@ def align_beamline(
 
             # ── d) Pitch fly_scan ─────────────────────────────────────────────
             if do_pitch_scan:
+                if step_cb: step_cb("Pitch scan")
                 if verbose:
                     print(f"\n  d) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
                           f"{pitch_nsteps} steps]")
@@ -2672,12 +2691,14 @@ def align_beamline(
                     print("\n  d) Pitch scan disabled – skipping")
 
             # ── e) Close vertical slit ────────────────────────────────────────
+            if step_cb: step_cb("Close V slit")
             if verbose:
                 print(f"\n  e) Closing vertical slit: V={slit_close_v}")
             _write_pv(slit_v, slit_close_v, f"slit_v → {slit_close_v}")
             time.sleep(5.0)
 
             # ── f) Roll2 smart_scan → move to centroid ────────────────────────
+            if step_cb: step_cb("Roll2 scan")
             if verbose:
                 print(f"\n  f) Roll2 smart_scan  [{roll2_start:+g} … {roll2_stop:+g}  "
                       f"{roll2_nsteps} steps]")
@@ -2705,6 +2726,7 @@ def align_beamline(
 
             # ── f2) Pitch fly_scan repeat ─────────────────────────────────────
             if do_pitch_scan:
+                if step_cb: step_cb("Pitch scan 2")
                 if verbose:
                     print(f"\n  f2) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
                           f"{pitch_nsteps} steps]")
@@ -2744,12 +2766,14 @@ def align_beamline(
                     print("\n  f2) Pitch scan disabled – skipping")
 
             # ── g-pre) Close horizontal slit ──────────────────────────────────
+            if step_cb: step_cb("Close H slit")
             if verbose:
                 print(f"\n  g-pre) Closing horizontal slit: H={slit_close_h}")
             _write_pv(slit_h, slit_close_h, f"slit_h → {slit_close_h}")
             time.sleep(5.0)
 
             # ── g) X2 smart_scan → move to centroid ───────────────────────────
+            if step_cb: step_cb("X2 scan")
             if verbose:
                 print(f"\n  g) X2 smart_scan  [{x2_start:+g} … {x2_stop:+g}  "
                       f"{x2_nsteps} steps]")
@@ -2794,11 +2818,13 @@ def align_beamline(
 
         except Exception as exc:
             import traceback as _tb
+            _row_ok = False
             if verbose:
                 print(f"\n  ✗ Error at MonoE={mono_e} keV: {exc}")
                 _tb.print_exc()
 
         # ── h) Read final RBV values and write CSV row ────────────────────────
+        if step_cb: step_cb("Record results")
         if verbose:
             print(f"\n  h) Recording optimised values …")
         if record_settle > 0 and not simulate:
@@ -2825,7 +2851,12 @@ def align_beamline(
         record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         writer.writerow(record)
         csv_file.flush()
+        record["_brg2_center"]  = r_brg2.center  if r_brg2  and r_brg2.center  is not None else float("nan")
+        record["_roll2_center"] = r_roll2.center if r_roll2 and r_roll2.center is not None else float("nan")
+        record["_x2_center"]   = r_x2.center    if r_x2    and r_x2.center    is not None else float("nan")
+        record["_row_ok"]      = _row_ok
         results.append(record)
+        if row_cb: row_cb(record)
 
         if verbose:
             print(f"\n  ✓ MonoE={mono_e} keV complete.  "

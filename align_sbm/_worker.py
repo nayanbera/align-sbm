@@ -28,6 +28,8 @@ class AlignWorker(QThread):
     scan_started   = pyqtSignal(str)            # tab name: BRG2 / Pitch / Roll2 / X2
     point_measured = pyqtSignal(float, float)   # (x, y) live data point
     scan_finished  = pyqtSignal(object)         # ScanResult after each scan completes
+    step_update    = pyqtSignal(str, int, int)  # (label, current, total)
+    row_done       = pyqtSignal(dict)           # record dict after each row completes
     done           = pyqtSignal(list)           # final results list
     error          = pyqtSignal(str)            # traceback string
 
@@ -59,14 +61,12 @@ class AlignWorker(QThread):
         orig_sample_loop = _m._sample_loop
 
         # Patch _Interface.read to emit one point per smart_scan step.
-        # _pos is always set by _Interface.move() just before read() is called.
         def _if_read_emit(iface_self):
             sig = orig_if_read(iface_self)
             worker.point_measured.emit(float(iface_self._pos), float(sig))
             return sig
 
         # Patch _sample_loop to emit one point per fly_scan sample.
-        # Mirrors the original loop exactly, adding only the signal emit.
         def _sample_loop_emit(iface, sample_interval, pos_list, sig_list,
                                stop_event, verbose):
             while not stop_event.is_set():
@@ -106,6 +106,19 @@ class AlignWorker(QThread):
         _m.smart_scan = _patched_ss
         _m.fly_scan   = _patched_fs
 
+        # Progress callbacks
+        do_pitch = self._kwargs.get("do_pitch_scan", True)
+        steps_per_row = 11 if do_pitch else 8
+        total_steps = max(len(self._table) * steps_per_row, 1)
+        step_counter = [0]
+
+        def _step_cb(label):
+            step_counter[0] += 1
+            worker.step_update.emit(label, step_counter[0], total_steps)
+
+        def _row_cb(record):
+            worker.row_done.emit(dict(record))
+
         stream = _LogStream(self.log_chunk)
         try:
             with contextlib.redirect_stdout(stream):
@@ -115,6 +128,8 @@ class AlignWorker(QThread):
                     simulate=self._simulate,
                     verbose=True,
                     debug=False,
+                    step_cb=_step_cb,
+                    row_cb=_row_cb,
                     **self._kwargs,
                 )
             self.done.emit(results or [])

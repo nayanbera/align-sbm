@@ -1,11 +1,25 @@
 """Setup tab — Motors/PVs and scan parameters."""
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox,
     QComboBox, QPushButton, QLabel, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView,
 )
+
+
+class _ReadbackThread(QThread):
+    """Reads a dict of {key: pv_name} in a background thread and emits results."""
+    values_ready = pyqtSignal(dict)
+
+    def __init__(self, pv_map, parent=None):
+        super().__init__(parent)
+        self._pv_map = pv_map
+
+    def run(self):
+        from .smart_scan_functions import caget
+        result = {key: caget(pv) for key, pv in self._pv_map.items()}
+        self.values_ready.emit(result)
 
 # ── Default PV names (ID15A2 prefix) ────────────────────────────────────────
 _PV_DEFAULTS = {
@@ -94,6 +108,9 @@ class SetupTab(QWidget):
         self._settings = settings
         self._pv_widgets = {}
         self._scan_widgets = {}
+        self._rbk_labels: dict = {}
+        self._rbk_thread = None
+        self._rbk_timer = None
         self._build_ui()
         self._load_settings()
 
@@ -161,6 +178,38 @@ class SetupTab(QWidget):
             self._pv_widgets[key] = w
             pvf.addRow(label + ":", w)
         vbox.addWidget(pv_grp)
+
+        # Live readback
+        rbk_grp = QGroupBox("Live Motor Positions")
+        rbk_v = QVBoxLayout(rbk_grp)
+
+        rbk_top = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setMaximumWidth(80)
+        refresh_btn.clicked.connect(self._refresh_readbacks)
+        self._auto_rbk_cb = QCheckBox("Auto (2 s)")
+        self._auto_rbk_cb.setToolTip("Poll all motor readbacks every 2 seconds")
+        self._auto_rbk_cb.toggled.connect(self._toggle_auto_readback)
+        rbk_top.addWidget(refresh_btn)
+        rbk_top.addWidget(self._auto_rbk_cb)
+        rbk_top.addStretch()
+        rbk_v.addLayout(rbk_top)
+
+        rbk_form = QFormLayout()
+        for key, label in [
+            ("brg2",        "BRG2 (RBV)"),
+            ("roll2_motor", "Roll2 (RBV)"),
+            ("x2_motor",    "X2 (RBV)"),
+            ("pitch_pv",    "Pitch"),
+            ("detector",    "Detector"),
+        ]:
+            lbl = QLabel("—")
+            lbl.setStyleSheet("font-family: monospace;")
+            lbl.setMinimumWidth(120)
+            self._rbk_labels[key] = lbl
+            rbk_form.addRow(label + ":", lbl)
+        rbk_v.addLayout(rbk_form)
+        vbox.addWidget(rbk_grp)
 
         vbox.addStretch()
         scroll.setWidget(container)
@@ -391,6 +440,55 @@ class SetupTab(QWidget):
         for r in rows:
             if r >= 0:
                 self._record_table.removeRow(r)
+
+    # ── Live readback ────────────────────────────────────────────────────────
+
+    def _refresh_readbacks(self):
+        if self._rbk_thread and self._rbk_thread.isRunning():
+            return
+        pv_map = {}
+        for key in ("brg2", "roll2_motor", "x2_motor"):
+            pv = self._pv_widgets[key].text().strip()
+            if pv:
+                pv_map[key] = pv + ".RBV"
+        for key in ("pitch_pv", "detector"):
+            pv = self._pv_widgets[key].text().strip()
+            if pv:
+                pv_map[key] = pv
+        if not pv_map:
+            return
+        self._rbk_thread = _ReadbackThread(pv_map, self)
+        self._rbk_thread.values_ready.connect(self._on_readbacks)
+        self._rbk_thread.start()
+
+    def _on_readbacks(self, values: dict):
+        for key, val in values.items():
+            lbl = self._rbk_labels.get(key)
+            if lbl is None:
+                continue
+            if val is None:
+                lbl.setText("—")
+                lbl.setStyleSheet("font-family: monospace; color: #888;")
+            else:
+                try:
+                    lbl.setText(f"{float(val):.6g}")
+                    lbl.setStyleSheet("font-family: monospace;")
+                except (TypeError, ValueError):
+                    lbl.setText(str(val))
+                    lbl.setStyleSheet("font-family: monospace;")
+
+    def _toggle_auto_readback(self, checked: bool):
+        if checked:
+            if self._rbk_timer is None:
+                from PyQt6.QtCore import QTimer
+                self._rbk_timer = QTimer(self)
+                self._rbk_timer.setInterval(2000)
+                self._rbk_timer.timeout.connect(self._refresh_readbacks)
+            self._rbk_timer.start()
+            self._refresh_readbacks()
+        else:
+            if self._rbk_timer is not None:
+                self._rbk_timer.stop()
 
     # ── Public API ───────────────────────────────────────────────────────────
 

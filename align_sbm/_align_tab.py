@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QGroupBox, QCheckBox, QPushButton, QLabel,
     QProgressBar, QPlainTextEdit, QListWidget, QListWidgetItem,
-    QTabWidget,
+    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from .smart_scan_functions import ScanStatus
 
@@ -23,6 +23,16 @@ _POINT_COLOR = "#4fc3f7"
 _FIT_COLOR   = "#ef5350"
 _PEAK_COLOR  = "#ffa726"
 _BG_COLOR    = "#1a1a2e"
+
+_RES_COLS    = ["#", "MonoE (keV)", "BRG2 ctr", "Roll2 RBV", "X2 RBV", "OK"]
+
+
+def _fmt(v, decimals=6):
+    try:
+        f = float(v)
+        return "—" if (f != f) else f"{f:.{decimals}g}"   # nan check
+    except (TypeError, ValueError):
+        return "—"
 
 
 class AlignTab(QWidget):
@@ -158,7 +168,7 @@ class AlignTab(QWidget):
     def _select_no_rows(self):
         self._row_list.clearSelection()
 
-    # ── Right: per-motor plot tabs + log ─────────────────────────────────────
+    # ── Right: per-motor plot tabs + results table + log ─────────────────────
 
     def _build_right_panel(self):
         panel = QWidget()
@@ -167,6 +177,7 @@ class AlignTab(QWidget):
 
         right_split = QSplitter(Qt.Orientation.Vertical)
 
+        # ── Plot tabs ──────────────────────────────────────────────────────────
         if _PG:
             self._plot_tabs = QTabWidget()
             for name in _MOTOR_TABS:
@@ -205,7 +216,32 @@ class AlignTab(QWidget):
             lbl.setStyleSheet("color: #888;")
             right_split.addWidget(lbl)
 
-        # Log panel
+        # ── Results table ──────────────────────────────────────────────────────
+        res_frame = QWidget()
+        res_v = QVBoxLayout(res_frame)
+        res_v.setContentsMargins(0, 0, 0, 0)
+        res_hdr = QHBoxLayout()
+        res_hdr.addWidget(QLabel("<b>Alignment Results</b>"))
+        res_hdr.addStretch()
+        clear_res_btn = QPushButton("Clear")
+        clear_res_btn.setMaximumWidth(60)
+        clear_res_btn.clicked.connect(lambda: self._results_table.setRowCount(0))
+        res_hdr.addWidget(clear_res_btn)
+        res_v.addLayout(res_hdr)
+
+        self._results_table = QTableWidget(0, len(_RES_COLS))
+        self._results_table.setHorizontalHeaderLabels(_RES_COLS)
+        hdr = self._results_table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for c in range(1, len(_RES_COLS)):
+            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+        self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._results_table.setMaximumHeight(150)
+        res_v.addWidget(self._results_table)
+        right_split.addWidget(res_frame)
+
+        # ── Log panel ──────────────────────────────────────────────────────────
         log_frame = QWidget()
         lv = QVBoxLayout(log_frame)
         lv.setContentsMargins(0, 0, 0, 0)
@@ -226,8 +262,9 @@ class AlignTab(QWidget):
         lv.addWidget(self._log)
         right_split.addWidget(log_frame)
 
-        right_split.setStretchFactor(0, 1)
-        right_split.setStretchFactor(1, 2)
+        right_split.setStretchFactor(0, 3)   # plots — largest
+        right_split.setStretchFactor(1, 1)   # results table — small
+        right_split.setStretchFactor(2, 2)   # log
         vbox.addWidget(right_split)
         return panel
 
@@ -261,17 +298,23 @@ class AlignTab(QWidget):
             f"{'═'*60}"
         )
 
+        # Clear results table for the new run
+        self._results_table.setRowCount(0)
+
         from ._worker import AlignWorker
         self._worker = AlignWorker(rows, kwargs, simulate, parent=self)
         self._worker.log_chunk.connect(self._on_log)
         self._worker.scan_started.connect(self._on_scan_started)
         self._worker.point_measured.connect(self._on_point_measured)
         self._worker.scan_finished.connect(self._on_scan_finished)
+        self._worker.step_update.connect(self._on_step_update)
+        self._worker.row_done.connect(self._on_row_done)
         self._worker.done.connect(self._on_done)
         self._worker.error.connect(self._on_error)
 
         self._start_btn.setEnabled(False)
         self._abort_btn.setEnabled(True)
+        self._progress.setRange(0, 0)   # indeterminate until first step
         self._progress.setVisible(True)
         self._status_lbl.setText("Running…")
         self.status_message.emit("Alignment running…")
@@ -298,6 +341,35 @@ class AlignTab(QWidget):
         cursor.insertText(text)
         self._log.setTextCursor(cursor)
         self._log.ensureCursorVisible()
+
+    def _on_step_update(self, label: str, current: int, total: int):
+        self._progress.setRange(0, total)
+        self._progress.setValue(current)
+        self._status_lbl.setText(f"[{current}/{total}] {label}")
+        self.status_message.emit(f"{label}…")
+
+    def _on_row_done(self, record: dict):
+        r = self._results_table.rowCount()
+        self._results_table.insertRow(r)
+        ok = record.get("_row_ok", True)
+        for c, val in enumerate([
+            str(r + 1),
+            _fmt(record.get("MonoE"), 6),
+            _fmt(record.get("_brg2_center")),
+            _fmt(record.get("Roll2")),
+            _fmt(record.get("X2")),
+            "✓" if ok else "✗",
+        ]):
+            item = QTableWidgetItem(val)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if c == 5:
+                item.setForeground(
+                    __import__("PyQt6.QtGui", fromlist=["QColor"]).QColor(
+                        "#66bb6a" if ok else "#ef5350"
+                    )
+                )
+            self._results_table.setItem(r, c, item)
+        self._results_table.scrollToBottom()
 
     def _on_scan_started(self, tab_name: str):
         """Switch to the named motor tab and clear its plot for a new scan."""
