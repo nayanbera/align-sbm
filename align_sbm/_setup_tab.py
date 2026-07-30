@@ -1,8 +1,9 @@
 """Setup tab — Motors/PVs and scan parameters."""
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
     QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QGroupBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox,
+    QGroupBox, QLineEdit, QSpinBox, QCheckBox,
     QComboBox, QPushButton, QLabel, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView,
 )
@@ -73,11 +74,8 @@ _SCAN_DEFAULTS = {
 
 
 def _dbl(val, lo=-1e6, hi=1e6, decimals=6, step=0.001):
-    w = QDoubleSpinBox()
-    w.setRange(lo, hi)
-    w.setDecimals(decimals)
-    w.setSingleStep(step)
-    w.setValue(val)
+    w = QLineEdit(str(val))
+    w.setValidator(QDoubleValidator(lo, hi, decimals))
     return w
 
 
@@ -490,10 +488,14 @@ class SetupTab(QWidget):
                 kwargs[key] = w.isChecked()
             elif isinstance(w, QComboBox):
                 kwargs[key] = w.currentText()
-            elif isinstance(w, (QDoubleSpinBox, QSpinBox)):
+            elif isinstance(w, QSpinBox):
                 kwargs[key] = w.value()
             elif isinstance(w, QLineEdit):
-                kwargs[key] = w.text().strip()
+                text = w.text().strip()
+                try:
+                    kwargs[key] = float(text)
+                except ValueError:
+                    kwargs[key] = text
 
         # Build record_pvs dict from the recording table
         record_pvs = {}
@@ -516,8 +518,6 @@ class SetupTab(QWidget):
                 self._settings.setValue(f"scan/{key}", w.isChecked())
             elif isinstance(w, QComboBox):
                 self._settings.setValue(f"scan/{key}", w.currentText())
-            elif isinstance(w, QDoubleSpinBox):
-                self._settings.setValue(f"scan/{key}", w.value())
             elif isinstance(w, QSpinBox):
                 self._settings.setValue(f"scan/{key}", w.value())
             elif isinstance(w, QLineEdit):
@@ -547,11 +547,6 @@ class SetupTab(QWidget):
                 idx = w.findText(str(v))
                 if idx >= 0:
                     w.setCurrentIndex(idx)
-            elif isinstance(w, QDoubleSpinBox):
-                try:
-                    w.setValue(float(v))
-                except (ValueError, TypeError):
-                    pass
             elif isinstance(w, QSpinBox):
                 try:
                     w.setValue(int(float(v)))
