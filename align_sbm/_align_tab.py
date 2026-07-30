@@ -39,11 +39,12 @@ def _fmt(v, decimals=6):
 class AlignTab(QWidget):
     status_message = pyqtSignal(str)
 
-    def __init__(self, setup_tab, energy_tab, parent=None):
+    def __init__(self, setup_tab, energy_tab, parent=None, settings=None):
         super().__init__(parent)
         self._setup_tab    = setup_tab
         self._energy_tab   = energy_tab
         self._worker       = None
+        self._settings     = settings
 
         # Live-point accumulation for the currently active scan
         self._current_tab  = "BRG2"
@@ -67,6 +68,7 @@ class AlignTab(QWidget):
         self._csv_path: str = ""
 
         self._build_ui()
+        self._restore_last_csv()
 
     def _build_ui(self):
         root = QHBoxLayout(self)
@@ -333,6 +335,20 @@ class AlignTab(QWidget):
     def _clear_log(self):
         self._log.clear()
 
+    def _save_csv_path(self):
+        if self._settings and self._csv_path:
+            self._settings.setValue("last_csv_path", self._csv_path)
+
+    def _restore_last_csv(self):
+        import os
+        if not self._settings:
+            return
+        path = self._settings.value("last_csv_path", "")
+        if path and os.path.isfile(path):
+            self._csv_path = path
+            self._csv_path_lbl.setText(path)
+            self._refresh_csv()
+
     def _open_csv(self):
         """Let the user pick an existing CSV to append to, after verifying columns."""
         import csv, os
@@ -370,6 +386,7 @@ class AlignTab(QWidget):
         self._csv_path = os.path.abspath(path)
         self._csv_path_lbl.setText(self._csv_path)
         self._setup_tab.set_output_filename(self._csv_path)
+        self._save_csv_path()
         self._refresh_csv()
         # Switch to CSV tab so user can see the loaded data
         self._bottom_tabs.setCurrentIndex(
@@ -475,6 +492,7 @@ class AlignTab(QWidget):
         raw_path = kwargs.get("filename", "alignment_results.csv")
         self._csv_path = os.path.abspath(raw_path)
         self._csv_path_lbl.setText(self._csv_path)
+        self._save_csv_path()
 
         self._log.appendPlainText(
             f"\n{'═'*60}\n"

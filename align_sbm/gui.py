@@ -21,7 +21,7 @@ class MainWindow(QMainWindow):
 
         self._setup_tab = SetupTab(self._settings)
         self._energy_tab = EnergyTab(self._settings)
-        self._align_tab = AlignTab(self._setup_tab, self._energy_tab)
+        self._align_tab = AlignTab(self._setup_tab, self._energy_tab, settings=self._settings)
 
         tabs = QTabWidget()
         tabs.addTab(self._setup_tab, "Setup")
