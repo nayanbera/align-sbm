@@ -14,6 +14,7 @@ PyQt6 GUI for the Side-Bounce Monochromator (SBM) alignment protocol at ID15A2.
 - numpy ≥ 1.24
 - scipy ≥ 1.10
 - pyepics ≥ 3.5 *(optional — simulation mode works without it)*
+- matplotlib ≥ 3.7 *(optional — required for the Predict from CSV plot)*
 
 ## Installation
 
@@ -39,7 +40,9 @@ align-sbm
 
 ## GUI Layout
 
-The GUI has three tabs.
+The GUI has three tabs: **Setup**, **Energy Table**, and **Alignment**.
+
+---
 
 ### Setup
 
@@ -58,7 +61,7 @@ Two inner tabs:
 | Undulator harmonic / energy / start | Undulator control PVs |
 | Roll2 / X2 energy set | Nominal encoder setpoint PVs written before each energy row |
 
-All PV names are saved and restored automatically between sessions.
+Each PV field shows a live readback value next to it (updated via CA monitor). All PV names are saved and restored automatically between sessions.
 
 **Scan Parameters**
 
@@ -70,6 +73,8 @@ Editable scan ranges, step counts, slit open/close values, fine-scan settings, s
 | Pitch | −1.0 | +1.0 | 21 |
 | Roll2 | −0.005 | +0.005 | 21 |
 | X2 | −0.5 | +0.5 | 21 |
+
+All numeric fields accept typed values of any magnitude (no spinner clamping).
 
 ---
 
@@ -86,26 +91,74 @@ A five-column table with rows of the form:
 | 25.0 | 3 | 25.10 | 3.3 × 10⁶ | −463 |
 | 30.0 | 3 | 30.13 | 3.4 × 10⁶ | −582 |
 
-Buttons: **Add Row**, **Remove Row**, **Load CSV**, **Save CSV**, **Reset to Defaults**.
+**Buttons:**
 
-The table is saved and restored between sessions. To load an external CSV the file must have header columns: `MonoE`, `Harmonic`, `UndE`, `Roll2`, `X2`.
+- **Add Row / Remove Row** — append or delete rows.
+- **Load CSV / Save CSV** — import or export the table. The CSV must have header columns `MonoE`, `Harmonic`, `UndE`, `Roll2`, `X2`.
+- **Reset to Defaults** — restore the built-in `table400` values.
+- **Predict from CSV…** — open the prediction dialog (see below).
+
+The table is saved and restored between sessions.
+
+#### Predict from CSV
+
+This dialog fits Roll2 and X2 as a function of MonoE using the alignment history stored in the output CSV, then lets you predict values for new intermediate energies and add them directly to the energy table.
+
+**Workflow:**
+
+1. The dialog opens with the last alignment CSV pre-loaded (the same file shown in the Alignment → CSV tab). Use *Browse…* to pick a different file.
+2. Choose a regression model:
+   - **Polynomial degree 1–4** — uses `numpy.polyfit`; R² is shown for both Roll2 and X2. The maximum available degree is capped at (number of data points − 1).
+   - **Cubic spline** — uses `scipy.interpolate.UnivariateSpline` (requires scipy and ≥ 4 data points); interpolates exactly through every measured point.
+3. A side-by-side plot shows the measured data (blue circles) and the fitted curve (orange line) for Roll2 and X2.
+4. In the prediction table, type a MonoE value in the first column — Roll2 and X2 are filled in automatically. **Harmonic** and **UndE** are highlighted amber to indicate they must be provided manually.
+5. Cells with **orange** background indicate the MonoE is outside the training range (extrapolation — use with caution).
+6. Click **Add to Energy Table** to append all completed rows.
 
 ---
 
 ### Alignment
 
-**Left panel — controls**
+#### Left panel — controls
 
-- **Simulation** checkbox — when checked, scans and motor moves are fully simulated (no EPICS). Enabled by default.
-- **Energy rows to align** — multi-select list populated from the Energy Table tab. Use *All* / *None* / *Refresh* to manage the selection.
-- **Start Alignment** — builds the EPICS/simulation context from the Setup tab and runs `align_beamline()` in a background thread for the selected rows.
-- **Abort** — terminates the background thread immediately.
-- **Demo Scan (sim)** — runs a single simulated `smart_scan` using the BRG2 range from Setup and immediately shows the data and fit curve in the plot. Useful for verifying the GUI without a beamline.
+**Mode**
 
-**Right panel — output**
+- **Simulation** checkbox — when checked, all scans and motor moves are fully simulated (Gaussian + noise, no EPICS). Enabled by default.
 
-- **Plot** (top) — updates after each scan with the raw signal data (blue dots) and the fitted curve (red line). A dashed vertical line marks the peak/centroid centre.
-- **Log** (bottom) — live stdout capture of all backend output, including per-step scan tables, fit results, and `[SIM]` tags in simulation mode.
+**Energy rows to align**
+
+Multi-select list populated from the Energy Table tab. Use **All** / **None** / **Refresh** to manage the selection.
+
+**Run**
+
+- **Start Alignment** — builds the EPICS/simulation context from the Setup tab and runs `align_beamline()` in a background thread for every selected energy row.
+- **Abort** — stops the running scan immediately (the background thread is terminated). If looping, no further iterations are started.
+- **Demo Scan (sim)** — runs a single simulated BRG2 `smart_scan` and animates its data points live in the BRG2 plot tab. Useful for verifying the GUI without a beamline.
+- **Loop** checkbox + **Iterations** field — when *Loop* is checked, the full alignment sequence repeats automatically after each pass.
+  - `0` (default) — runs indefinitely until **Abort** is pressed.
+  - `N > 0` — runs exactly N times then stops.
+  - The log marks each iteration with `Loop N/total` headers. The results table accumulates across all loops.
+
+#### Right panel — output
+
+**Plot tabs (BRG2 / Pitch / Roll2 / X2)**
+
+Each motor has its own tab. During a scan, data points appear in real time (blue dots). On scan completion the fitted curve (red line) and peak marker (dashed vertical line) are overlaid. A parameter annotation in the top-right corner shows Profile, Center, FWHM, Sigma, Amplitude, Offset (and the super-Gaussian *p* exponent when applicable).
+
+**Bottom tabs**
+
+| Tab | Contents |
+|---|---|
+| Results | Summary table — one row per completed energy row: MonoE, BRG2 centre, Roll2 RBV, X2 RBV, pass/fail tick. |
+| Log | Live stdout from the backend — per-step scan tables, fit results, warnings, and `[SIM]` tags. |
+| CSV | Live view of the output CSV file. Refreshes automatically after each completed energy row. |
+
+**CSV tab controls:**
+
+- **Open CSV…** — load an existing CSV file to append new results to. The column layout must match the current setup (record PVs). Adopts the file as the new output target.
+- **Delete Row(s)** — permanently remove selected rows from the CSV file (confirmation required; file is rewritten in place).
+- **Refresh** — manually reload the CSV view.
+- The path of the last opened or written CSV is remembered and the file is loaded automatically the next time the application starts.
 
 ---
 
@@ -128,16 +181,31 @@ For each selected energy row `align_beamline()` runs these steps in order:
 
 The CSV output file (default `alignment_results.csv`) grows one row per energy, with columns: `datetime`, `MonoE`, `Harmonic`, `UndE`, `Roll2`, `X2`.
 
+---
+
+## Scan Details
+
+### Coarse + fine scan phases
+
+`smart_scan` runs in two phases:
+
+1. **Coarse sweep** — scans from `start` to `stop` in `nsteps` steps. If the peak lands near the scan edge, the range is extended automatically until the peak is fully captured.
+2. **Fine scan** — centres a narrower window (default ±3σ, 21 steps) on the coarse peak and refines the position. The motor moves to the start of the fine range *before* the detector flush, so no wasted traversal occurs between phases.
+
 ### Peak-finding logic
 
 After each scan the motor moves to a position chosen by `_choose_centre()`:
 
 ```
-FWHM > |peak_pos − centroid|  →  move to peak_pos
-otherwise                      →  move to centroid
+FWHM > |peak_pos − centroid|  →  move to centroid
+otherwise                      →  move to peak_pos
 ```
 
 With `peak_method="stats"` (default) all metrics are model-free (centroid, RMS width, FWHM by linear interpolation). With `peak_method="fit"` the code fits a Gaussian, Lorentzian, or super-Gaussian and picks the lowest-residual model.
+
+### Backlash correction
+
+When `backlash_correction=True`, the motor overshoots the target by one FWHM in the direction opposite to the scan, then approaches from the scan direction — ensuring a consistent final approach.
 
 ---
 
