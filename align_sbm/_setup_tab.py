@@ -105,16 +105,15 @@ class SetupTab(QWidget):
         self._bridge.value_changed.connect(self._on_pv_value)
         self._build_ui()
         self._load_settings()
+        self._subscribe_pvs()
 
     def _build_ui(self):
         outer = QVBoxLayout(self)
 
-        self._inner_tabs = QTabWidget()
-        self._inner_tabs.addTab(self._build_pv_page(), "Motors && PVs")
-        self._inner_tabs.addTab(self._build_scan_page(), "Scan Parameters")
-        self._inner_tabs.addTab(self._build_readback_page(), "Live Readback")
-        self._inner_tabs.currentChanged.connect(self._on_inner_tab_changed)
-        outer.addWidget(self._inner_tabs)
+        inner_tabs = QTabWidget()
+        inner_tabs.addTab(self._build_pv_page(), "Motors && PVs")
+        inner_tabs.addTab(self._build_scan_page(), "Scan Parameters")
+        outer.addWidget(inner_tabs)
 
     # ── Motors & PVs page ───────────────────────────────────────────────────
 
@@ -125,7 +124,26 @@ class SetupTab(QWidget):
         vbox = QVBoxLayout(container)
         vbox.setSpacing(8)
 
-        # Prefix apply row
+        # Helper: build a [QLineEdit | live-value label] row widget and register both.
+        def _pv_row(key, default, tip=""):
+            w = _le(default)
+            if tip:
+                w.setToolTip(tip)
+            self._pv_widgets[key] = w
+            rbk = QLabel("—")
+            rbk.setFixedWidth(110)
+            rbk.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            rbk.setStyleSheet("color: #888; font-family: monospace;")
+            self._rbk_labels[key] = rbk
+            row_w = QWidget()
+            rh = QHBoxLayout(row_w)
+            rh.setContentsMargins(0, 0, 0, 0)
+            rh.setSpacing(6)
+            rh.addWidget(w, 1)
+            rh.addWidget(rbk)
+            return row_w
+
+        # Prefix apply row (no live readback — not a PV)
         prefix_grp = QGroupBox("PV Prefix")
         pf = QHBoxLayout(prefix_grp)
         self._pv_widgets["pv_prefix"] = _le(_PV_DEFAULTS["pv_prefix"])
@@ -136,24 +154,25 @@ class SetupTab(QWidget):
         apply_btn.setToolTip("Replaces all PV name prefixes with the value above")
         apply_btn.clicked.connect(self._apply_prefix)
         pf.addWidget(apply_btn)
+        reconnect_btn = QPushButton("Reconnect")
+        reconnect_btn.setToolTip("Re-subscribe CA monitors after changing PV names")
+        reconnect_btn.clicked.connect(self._subscribe_pvs)
+        pf.addWidget(reconnect_btn)
         vbox.addWidget(prefix_grp)
 
-        # Motors
-        motor_grp = QGroupBox("EPICS Motors (motor record base PV)")
+        # Motors — live value shows .RBV
+        motor_grp = QGroupBox("EPICS Motors  ·  RBV →")
         mf = QFormLayout(motor_grp)
         for key, label, tip in [
-            ("brg2",        "BRG2 motor",   "Bragg 2 motor record base PV"),
-            ("roll2_motor", "Roll2 motor",  "Roll2 motor record base PV"),
-            ("x2_motor",    "X2 motor",     "X2 motor record base PV"),
+            ("brg2",        "BRG2",   "Bragg 2 motor record base PV"),
+            ("roll2_motor", "Roll2",  "Roll2 motor record base PV"),
+            ("x2_motor",    "X2",     "X2 motor record base PV"),
         ]:
-            w = _le(_PV_DEFAULTS[key])
-            w.setToolTip(tip)
-            self._pv_widgets[key] = w
-            mf.addRow(label + ":", w)
+            mf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
         vbox.addWidget(motor_grp)
 
-        # PVs
-        pv_grp = QGroupBox("Process Variables")
+        # Process Variables — live value shows the PV itself
+        pv_grp = QGroupBox("Process Variables  ·  current value →")
         pvf = QFormLayout(pv_grp)
         for key, label, tip in [
             ("detector",        "Detector",           "Scalar detector readback PV"),
@@ -167,10 +186,7 @@ class SetupTab(QWidget):
             ("roll2_energy_pv", "Roll2 energy set",   "Roll2 nominal energy setpoint PV"),
             ("x2_energy_pv",    "X2 energy set",      "X2 nominal energy setpoint PV"),
         ]:
-            w = _le(_PV_DEFAULTS[key])
-            w.setToolTip(tip)
-            self._pv_widgets[key] = w
-            pvf.addRow(label + ":", w)
+            pvf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
         vbox.addWidget(pv_grp)
 
         vbox.addStretch()
@@ -195,6 +211,7 @@ class SetupTab(QWidget):
             else:
                 new_val = prefix + current
             w.setText(new_val)
+        self._subscribe_pvs()
 
     # ── Scan Parameters page ────────────────────────────────────────────────
 
@@ -403,60 +420,8 @@ class SetupTab(QWidget):
             if r >= 0:
                 self._record_table.removeRow(r)
 
-    # ── Live Readback tab ────────────────────────────────────────────────────
-
-    def _build_readback_page(self):
-        page = QWidget()
-        vbox = QVBoxLayout(page)
-        vbox.setSpacing(12)
-
-        # Controls row
-        ctrl = QHBoxLayout()
-        reconnect_btn = QPushButton("Reconnect")
-        reconnect_btn.setToolTip(
-            "Re-subscribe to PVs — use after changing PV names in Motors && PVs"
-        )
-        reconnect_btn.clicked.connect(self._subscribe_pvs)
-        ctrl.addWidget(reconnect_btn)
-        ctrl.addStretch()
-        vbox.addLayout(ctrl)
-
-        # Readback values
-        rbk_grp = QGroupBox("Current Motor / PV Values")
-        form = QFormLayout(rbk_grp)
-        form.setHorizontalSpacing(20)
-        for key, label in [
-            ("brg2",        "BRG2 (RBV)"),
-            ("roll2_motor", "Roll2 (RBV)"),
-            ("x2_motor",    "X2 (RBV)"),
-            ("pitch_pv",    "Pitch piezo"),
-            ("detector",    "Detector signal"),
-        ]:
-            lbl = QLabel("—")
-            lbl.setStyleSheet("font-family: monospace; font-size: 13px;")
-            lbl.setMinimumWidth(160)
-            self._rbk_labels[key] = lbl
-            form.addRow(f"<b>{label}</b>:", lbl)
-        vbox.addWidget(rbk_grp)
-
-        info = QLabel(
-            "Values update automatically via EPICS CA monitors — no polling.  "
-            "Shows <span style='color:#888'>—</span> when EPICS is unavailable."
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: #777; font-size: 11px;")
-        vbox.addWidget(info)
-        vbox.addStretch()
-        return page
-
-    def _on_inner_tab_changed(self, index: int):
-        if self._inner_tabs.tabText(index) == "Live Readback":
-            self._subscribe_pvs()
-        else:
-            self._unsubscribe_pvs()
-
     def _subscribe_pvs(self):
-        """Create CA monitors for the configured motor / PV names."""
+        """Create CA monitors for all configured motor / PV names."""
         self._unsubscribe_pvs()
         from .smart_scan_functions import create_pv_monitor
         bridge = self._bridge
@@ -465,22 +430,26 @@ class SetupTab(QWidget):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv + ".RBV"
-        for key in ("pitch_pv", "detector"):
+        for key in ("detector", "pitch_pv", "slit_v_pv", "slit_h_pv",
+                    "mono_e_pv", "harmonic_pv", "und_e_pv", "und_start_pv",
+                    "roll2_energy_pv", "x2_energy_pv"):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv
         for key, pv_name in pv_map.items():
-            lbl = self._rbk_labels[key]
+            lbl = self._rbk_labels.get(key)
+            if lbl is None:
+                continue
             handle = create_pv_monitor(
                 pv_name,
                 lambda val, k=key: bridge.value_changed.emit(k, val),
             )
             if handle is None:
                 lbl.setText("—")
-                lbl.setStyleSheet("font-family: monospace; color: #888;")
+                lbl.setStyleSheet("color: #888; font-family: monospace;")
             else:
-                lbl.setText("connecting…")
-                lbl.setStyleSheet("font-family: monospace; color: #888;")
+                lbl.setText("…")
+                lbl.setStyleSheet("color: #888; font-family: monospace;")
                 self._rbk_pvs[key] = handle
 
     def _unsubscribe_pvs(self):
