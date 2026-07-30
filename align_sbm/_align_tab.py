@@ -323,6 +323,7 @@ class AlignTab(QWidget):
             np.array(self._live_xs, dtype=float),
             np.array(self._live_ys, dtype=float),
         )
+        self._plot_widgets[self._current_tab].getViewBox().autoRange()
 
     def _on_scan_finished(self, result):
         """Overlay the fit curve on the current tab after a scan completes."""
@@ -358,6 +359,8 @@ class AlignTab(QWidget):
             self._peak_lines[tab_name].setValue(result.center)
         else:
             self._fit_items[tab_name].setData([], [])
+        if tab_name in self._plot_widgets:
+            self._plot_widgets[tab_name].getViewBox().autoRange()
 
     # ── Demo scan ────────────────────────────────────────────────────────────
 
