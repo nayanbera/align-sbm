@@ -65,8 +65,9 @@ _SCAN_DEFAULTS = {
     "settle":           0.3,
     "energy_settle":    2.0,
     "record_settle":    2.0,
-    "do_pitch_scan":   True,
-    "peak_method":     "stats",
+    "do_pitch_scan":        True,
+    "backlash_correction":  False,
+    "peak_method":          "stats",
     "stats_centre":    "centroid",
     "fit_profile":     "auto",
     "filename":        "alignment_results.csv",
@@ -340,6 +341,15 @@ class SetupTab(QWidget):
         # Other
         other_grp = QGroupBox("Other Parameters")
         of = QFormLayout(other_grp)
+
+        backlash_w = QCheckBox("Enable backlash correction")
+        backlash_w.setToolTip(
+            "After each scan, overshoot by one FWHM then return to the peak "
+            "to eliminate motor backlash before recording the position."
+        )
+        backlash_w.setChecked(_SCAN_DEFAULTS["backlash_correction"])
+        self._scan_widgets["backlash_correction"] = backlash_w
+        of.addRow("Backlash:", backlash_w)
 
         settle_w = _dbl(_SCAN_DEFAULTS["settle"], lo=0.0, hi=60.0, decimals=2, step=0.05)
         self._scan_widgets["settle"] = settle_w
