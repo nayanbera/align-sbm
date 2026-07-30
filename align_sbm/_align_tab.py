@@ -201,7 +201,11 @@ class AlignTab(QWidget):
                     pen=pg.mkPen(_PEAK_COLOR, width=1,
                                  style=Qt.PenStyle.DashLine),
                 )
+                peak_line.setVisible(False)   # hidden until a fit is drawn
                 pw.addItem(peak_line)
+                pw.getViewBox().disableAutoRange()
+                pw.setXRange(-1, 1)
+                pw.setYRange(0, 1)
 
                 param_item = pg.TextItem(
                     text="", anchor=(1.0, 0.0),
@@ -395,7 +399,7 @@ class AlignTab(QWidget):
         self._plot_tabs.setCurrentIndex(idx)
         self._data_items[tab_name].setData([], [])
         self._fit_items[tab_name].setData([], [])
-        self._peak_lines[tab_name].setValue(0)
+        self._peak_lines[tab_name].setVisible(False)
         if tab_name in self._param_items:
             self._param_items[tab_name].setText("")
         self._plot_widgets[tab_name].setTitle(f"{tab_name} — scanning…")
@@ -458,6 +462,7 @@ class AlignTab(QWidget):
 
             self._fit_items[tab_name].setData(fit_xs, fit_ys)
             self._peak_lines[tab_name].setValue(cen)
+            self._peak_lines[tab_name].setVisible(True)
 
             # Build parameter annotation
             lines = [f"Profile : {prof}",
