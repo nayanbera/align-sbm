@@ -100,7 +100,7 @@ class SetupTab(QWidget):
         self._scan_widgets = {}
         self._rbk_labels: dict = {}
         self._rbk_pvs: dict = {}          # key → epics.PV handle
-        self._bridge = _PVBridge()
+        self._bridge = _PVBridge(self)
         self._bridge.value_changed.connect(self._on_pv_value)
         self._build_ui()
         self._load_settings()
@@ -469,10 +469,14 @@ class SetupTab(QWidget):
             lbl = self._rbk_labels.get(key)
             if lbl is None:
                 continue
-            handle = create_pv_monitor(
-                pv_name,
-                lambda val, k=key: bridge.value_changed.emit(k, val),
-            )
+            def _make_cb(k, br):
+                def _cb(val):
+                    try:
+                        br.value_changed.emit(k, val)
+                    except RuntimeError:
+                        pass
+                return _cb
+            handle = create_pv_monitor(pv_name, _make_cb(key, bridge))
             if handle is None:
                 lbl.setText("—")
                 lbl.setStyleSheet("color: #888; font-family: monospace;")
