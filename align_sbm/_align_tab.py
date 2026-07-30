@@ -413,23 +413,29 @@ class AlignTab(QWidget):
     def _draw_fit(self, tab_name: str, result):
         if tab_name not in self._fit_items:
             return
-        pos = np.asarray(result.positions, dtype=float)
-        sig = np.asarray(result.signals,   dtype=float)
+        # Keep all accumulated live points (coarse + fine phases) so neither
+        # phase gets dropped when the fit overlay is drawn.
+        if self._live_xs:
+            pos = np.array(self._live_xs, dtype=float)
+            sig = np.array(self._live_ys, dtype=float)
+        else:
+            pos = np.asarray(result.positions, dtype=float)
+            sig = np.asarray(result.signals,   dtype=float)
         self._data_items[tab_name].setData(pos, sig)
 
         if (result.center is not None
                 and result.sigma is not None
                 and result.amplitude is not None):
-            xs = np.linspace(pos.min(), pos.max(), 300)
+            fit_xs = np.linspace(pos.min(), pos.max(), 300)
             offset = result.offset or 0.0
             if result.profile == "lorentzian":
                 gamma = result.sigma * np.sqrt(2 * np.log(2))
-                ys = result.amplitude / (1 + ((xs - result.center) / gamma) ** 2) + offset
+                fit_ys = result.amplitude / (1 + ((fit_xs - result.center) / gamma) ** 2) + offset
             else:
-                ys = (result.amplitude
-                      * np.exp(-0.5 * ((xs - result.center) / result.sigma) ** 2)
-                      + offset)
-            self._fit_items[tab_name].setData(xs, ys)
+                fit_ys = (result.amplitude
+                          * np.exp(-0.5 * ((fit_xs - result.center) / result.sigma) ** 2)
+                          + offset)
+            self._fit_items[tab_name].setData(fit_xs, fit_ys)
             self._peak_lines[tab_name].setValue(result.center)
         else:
             self._fit_items[tab_name].setData([], [])

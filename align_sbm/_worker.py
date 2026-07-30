@@ -61,13 +61,20 @@ class AlignWorker(QThread):
         orig_sample_loop = _m._sample_loop
 
         # Patch _Interface.read to emit one point per smart_scan step.
+        # _fresh_read() polls the detector several times at the same position;
+        # only emit when the motor position has actually changed.
+        _last_emit_pos = [None]
+
         def _if_read_emit(iface_self):
             sig = orig_if_read(iface_self)
             try:
-                pos = iface_self.position()   # works for both sim and real EPICS
+                pos = float(iface_self.position())
             except Exception:
-                pos = getattr(iface_self, "_pos", 0.0)
-            worker.point_measured.emit(float(pos), float(sig))
+                pos = float(getattr(iface_self, "_pos", 0.0))
+            last = _last_emit_pos[0]
+            if last is None or abs(pos - last) > 1e-9:
+                _last_emit_pos[0] = pos
+                worker.point_measured.emit(pos, float(sig))
             return sig
 
         # Patch _sample_loop to emit one point per fly_scan sample.
@@ -87,6 +94,7 @@ class AlignWorker(QThread):
                     time.sleep(remaining)
 
         def _patched_ss(motor, det, start, stop, *args, **kw):
+            _last_emit_pos[0] = None   # reset so first point always emits
             tab = worker._tab_for_motor(motor)
             worker.scan_started.emit(tab)
             _m._Interface.read = _if_read_emit
