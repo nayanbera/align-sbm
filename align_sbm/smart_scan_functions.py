@@ -693,8 +693,8 @@ class _Interface:
                     try:
                         _conn = self._motor.connected
                         print(f"    [DEBUG] Motor.connected = {_conn}")
-                    except AttributeError as _ae:
-                        print(f"    [DEBUG] Motor.connected raised AttributeError: {_ae} — skipping check")
+                    except Exception as _ae:
+                        print(f"    [DEBUG] Motor.connected raised {type(_ae).__name__}: {_ae} — skipping check")
                         _conn = True
                     if not _conn:
                         raise ConnectionError(f"Motor PV not connected: {motor}")
