@@ -158,7 +158,34 @@ Each motor has its own tab. During a scan, data points appear in real time (blue
 - **Open CSV…** — load an existing CSV file to append new results to. The column layout must match the current setup (record PVs). Adopts the file as the new output target.
 - **Delete Row(s)** — permanently remove selected rows from the CSV file (confirmation required; file is rewritten in place).
 - **Refresh** — manually reload the CSV view.
+- **Analyze…** — open the statistical analysis dialog for the current CSV file (see below).
 - The path of the last opened or written CSV is remembered and the file is loaded automatically the next time the application starts.
+
+#### Statistical Analysis Dialog
+
+Opened via **Analyze…** in the CSV tab. Accepts any alignment CSV (auto-loaded from the current file; use *Browse…* to pick another).
+
+**Plots tab** — interactive matplotlib figure with zoom/pan toolbar, arranged in a 3 × 2 grid:
+
+| Position | Plot |
+|---|---|
+| Top-left | Roll2 vs measurement index, one trace per MonoE energy |
+| Top-right | X2 vs measurement index, one trace per MonoE energy |
+| Middle-left | Roll2 mean ± std bar chart per energy group |
+| Middle-right | X2 mean ± std bar chart per energy group |
+| Bottom-left | Pearson correlation heatmap for all numeric columns, with annotated *r* values |
+| Bottom-right | Roll2 vs X2 scatter plot, coloured by MonoE |
+
+**Report tab** — scrollable HTML report with six sections:
+
+1. **Descriptive Statistics** — count, mean, std, min, 25 %, median, 75 %, max for every numeric column.
+2. **Per-Energy Group Statistics** — mean, std, and coefficient of variation (CV %) for Roll2 and X2 at each MonoE. CV is colour-coded: green < 0.5 %, amber < 2 % (reproducibility indicator across repeated loops).
+3. **Pearson Correlation Matrix** — pairwise linear correlation between all numeric columns.
+4. **Spearman Rank Correlation Matrix** — non-parametric alternative; requires scipy.
+5. **Drift Analysis** — for each (MonoE, column) pair, fits a linear trend to the measurement sequence and reports slope, intercept, and R². A near-zero slope indicates stable alignment; a large slope flags positional drift across loops.
+6. **Strongest Pairwise Correlations** — top-10 column pairs ranked by |r|, with plain-language interpretation (negligible / weak / moderate / strong / very strong, positive / negative).
+
+**Export Report…** saves the full report as a standalone HTML file.
 
 ---
 
