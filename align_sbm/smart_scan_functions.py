@@ -687,14 +687,19 @@ class _Interface:
             else:
                 self._pvaxis = None
                 if isinstance(motor, str):
+                    print(f"    [DEBUG] Creating epics.Motor({motor!r})")
                     self._motor = epics.Motor(motor)
+                    print(f"    [DEBUG] Motor type: {type(self._motor).__name__}")
                     try:
                         _conn = self._motor.connected
-                    except AttributeError:
-                        _conn = True  # epics.Motor.__getattr__ may intercept; skip check
+                        print(f"    [DEBUG] Motor.connected = {_conn}")
+                    except AttributeError as _ae:
+                        print(f"    [DEBUG] Motor.connected raised AttributeError: {_ae} — skipping check")
+                        _conn = True
                     if not _conn:
                         raise ConnectionError(f"Motor PV not connected: {motor}")
                 else:
+                    print(f"    [DEBUG] Motor passed as object: {type(motor).__name__}")
                     self._motor = motor
 
             if isinstance(det, str):
@@ -1514,14 +1519,19 @@ class _FlyInterface:
                 self._pvaxis = motor
                 self._motor  = None
             elif isinstance(motor, str):
+                print(f"    [DEBUG] fly_scan: Creating epics.Motor({motor!r})")
                 self._motor = epics.Motor(motor)
+                print(f"    [DEBUG] fly_scan: Motor type: {type(self._motor).__name__}")
                 try:
                     _conn = self._motor.connected
-                except AttributeError:
-                    _conn = True  # epics.Motor.__getattr__ may intercept; skip check
+                    print(f"    [DEBUG] fly_scan: Motor.connected = {_conn}")
+                except AttributeError as _ae:
+                    print(f"    [DEBUG] fly_scan: Motor.connected raised AttributeError: {_ae} — skipping check")
+                    _conn = True
                 if not _conn:
                     raise ConnectionError(f"Motor PV not connected: {motor}")
             else:
+                print(f"    [DEBUG] fly_scan: Motor passed as object: {type(motor).__name__}")
                 self._motor = motor
 
             if isinstance(det, str):
@@ -2848,7 +2858,7 @@ def align_beamline(
             _row_ok = False
             if verbose:
                 print(f"\n  ✗ Error at MonoE={mono_e} keV: {exc}")
-                _tb.print_exc()
+                print(_tb.format_exc())
 
         # ── h) Read final RBV values and write CSV row ────────────────────────
         if step_cb: step_cb("Record results")
