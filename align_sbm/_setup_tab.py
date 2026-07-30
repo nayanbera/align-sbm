@@ -191,6 +191,18 @@ class SetupTab(QWidget):
         scroll.setWidget(container)
         return scroll
 
+    def _browse_csv(self):
+        from PyQt6.QtWidgets import QFileDialog
+        import os
+        current = self._scan_widgets["filename"].text().strip()
+        start_dir = os.path.dirname(os.path.abspath(current)) if current else ""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Choose output CSV file", start_dir or "",
+            "CSV files (*.csv);;All files (*)"
+        )
+        if path:
+            self._scan_widgets["filename"].setText(path)
+
     def _apply_prefix(self):
         prefix = self._pv_widgets["pv_prefix"].text().strip()
         if not prefix:
@@ -357,7 +369,16 @@ class SetupTab(QWidget):
 
         filename_w = _le(_SCAN_DEFAULTS["filename"])
         self._scan_widgets["filename"] = filename_w
-        of.addRow("Output CSV:", filename_w)
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setFixedWidth(80)
+        browse_btn.clicked.connect(self._browse_csv)
+        fn_row = QWidget()
+        fn_h = QHBoxLayout(fn_row)
+        fn_h.setContentsMargins(0, 0, 0, 0)
+        fn_h.setSpacing(4)
+        fn_h.addWidget(filename_w, 1)
+        fn_h.addWidget(browse_btn)
+        of.addRow("Output CSV:", fn_row)
 
         r_settle_w = _dbl(_SCAN_DEFAULTS["record_settle"], lo=0.0, hi=60.0, decimals=1, step=0.5)
         self._scan_widgets["record_settle"] = r_settle_w
