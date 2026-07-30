@@ -117,10 +117,12 @@ class SetupTab(QWidget):
     def _build_ui(self):
         outer = QVBoxLayout(self)
 
-        inner_tabs = QTabWidget()
-        inner_tabs.addTab(self._build_pv_page(), "Motors && PVs")
-        inner_tabs.addTab(self._build_scan_page(), "Scan Parameters")
-        outer.addWidget(inner_tabs)
+        self._inner_tabs = QTabWidget()
+        self._inner_tabs.addTab(self._build_pv_page(), "Motors && PVs")
+        self._inner_tabs.addTab(self._build_scan_page(), "Scan Parameters")
+        self._inner_tabs.addTab(self._build_readback_page(), "Live Readback")
+        self._inner_tabs.currentChanged.connect(self._on_inner_tab_changed)
+        outer.addWidget(self._inner_tabs)
 
     # ── Motors & PVs page ───────────────────────────────────────────────────
 
@@ -178,38 +180,6 @@ class SetupTab(QWidget):
             self._pv_widgets[key] = w
             pvf.addRow(label + ":", w)
         vbox.addWidget(pv_grp)
-
-        # Live readback
-        rbk_grp = QGroupBox("Live Motor Positions")
-        rbk_v = QVBoxLayout(rbk_grp)
-
-        rbk_top = QHBoxLayout()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setMaximumWidth(80)
-        refresh_btn.clicked.connect(self._refresh_readbacks)
-        self._auto_rbk_cb = QCheckBox("Auto (2 s)")
-        self._auto_rbk_cb.setToolTip("Poll all motor readbacks every 2 seconds")
-        self._auto_rbk_cb.toggled.connect(self._toggle_auto_readback)
-        rbk_top.addWidget(refresh_btn)
-        rbk_top.addWidget(self._auto_rbk_cb)
-        rbk_top.addStretch()
-        rbk_v.addLayout(rbk_top)
-
-        rbk_form = QFormLayout()
-        for key, label in [
-            ("brg2",        "BRG2 (RBV)"),
-            ("roll2_motor", "Roll2 (RBV)"),
-            ("x2_motor",    "X2 (RBV)"),
-            ("pitch_pv",    "Pitch"),
-            ("detector",    "Detector"),
-        ]:
-            lbl = QLabel("—")
-            lbl.setStyleSheet("font-family: monospace;")
-            lbl.setMinimumWidth(120)
-            self._rbk_labels[key] = lbl
-            rbk_form.addRow(label + ":", lbl)
-        rbk_v.addLayout(rbk_form)
-        vbox.addWidget(rbk_grp)
 
         vbox.addStretch()
         scroll.setWidget(container)
@@ -441,7 +411,56 @@ class SetupTab(QWidget):
             if r >= 0:
                 self._record_table.removeRow(r)
 
-    # ── Live readback ────────────────────────────────────────────────────────
+    # ── Live Readback tab ────────────────────────────────────────────────────
+
+    def _build_readback_page(self):
+        page = QWidget()
+        vbox = QVBoxLayout(page)
+        vbox.setSpacing(12)
+
+        # Controls row
+        ctrl = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh Now")
+        refresh_btn.clicked.connect(self._refresh_readbacks)
+        self._auto_rbk_cb = QCheckBox("Auto-refresh every 2 s")
+        self._auto_rbk_cb.setToolTip("Continuously poll motor readbacks via EPICS caget")
+        self._auto_rbk_cb.toggled.connect(self._toggle_auto_readback)
+        ctrl.addWidget(refresh_btn)
+        ctrl.addWidget(self._auto_rbk_cb)
+        ctrl.addStretch()
+        vbox.addLayout(ctrl)
+
+        # Readback table
+        rbk_grp = QGroupBox("Current Motor / PV Values")
+        form = QFormLayout(rbk_grp)
+        form.setHorizontalSpacing(20)
+        for key, label in [
+            ("brg2",        "BRG2 (RBV)"),
+            ("roll2_motor", "Roll2 (RBV)"),
+            ("x2_motor",    "X2 (RBV)"),
+            ("pitch_pv",    "Pitch piezo"),
+            ("detector",    "Detector signal"),
+        ]:
+            lbl = QLabel("—")
+            lbl.setStyleSheet("font-family: monospace; font-size: 13px;")
+            lbl.setMinimumWidth(160)
+            self._rbk_labels[key] = lbl
+            form.addRow(f"<b>{label}</b>:", lbl)
+        vbox.addWidget(rbk_grp)
+
+        info = QLabel(
+            "Values read via <tt>epics.caget()</tt>.  "
+            "Shows <span style='color:#888'>—</span> when EPICS is unavailable (simulation mode)."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #777; font-size: 11px;")
+        vbox.addWidget(info)
+        vbox.addStretch()
+        return page
+
+    def _on_inner_tab_changed(self, index: int):
+        if self._inner_tabs.tabText(index) == "Live Readback":
+            self._refresh_readbacks()
 
     def _refresh_readbacks(self):
         if self._rbk_thread and self._rbk_thread.isRunning():
