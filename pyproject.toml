@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "align-sbm"
+version = "0.1.0"
+description = "Side-Bounce Monochromator alignment routines with PyQt6 GUI"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pyepics>=3.5",
+    "PyQt6>=6.4",
+    "pyqtgraph>=0.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-qt>=4",
+    "ruff",
+]
+
+[project.scripts]
+align-sbm = "align_sbm.gui:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
