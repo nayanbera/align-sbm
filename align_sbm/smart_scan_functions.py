@@ -688,7 +688,11 @@ class _Interface:
                 self._pvaxis = None
                 if isinstance(motor, str):
                     self._motor = epics.Motor(motor)
-                    if not self._motor.connected:
+                    try:
+                        _conn = self._motor.connected
+                    except AttributeError:
+                        _conn = True  # epics.Motor.__getattr__ may intercept; skip check
+                    if not _conn:
                         raise ConnectionError(f"Motor PV not connected: {motor}")
                 else:
                     self._motor = motor
@@ -1511,7 +1515,11 @@ class _FlyInterface:
                 self._motor  = None
             elif isinstance(motor, str):
                 self._motor = epics.Motor(motor)
-                if not self._motor.connected:
+                try:
+                    _conn = self._motor.connected
+                except AttributeError:
+                    _conn = True  # epics.Motor.__getattr__ may intercept; skip check
+                if not _conn:
                     raise ConnectionError(f"Motor PV not connected: {motor}")
             else:
                 self._motor = motor
