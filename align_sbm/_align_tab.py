@@ -62,6 +62,9 @@ class AlignTab(QWidget):
         self._demo_result  = None
         self._demo_idx     = 0
 
+        # CSV viewer state
+        self._csv_path: str = ""
+
         self._build_ui()
 
     def _build_ui(self):
@@ -277,6 +280,32 @@ class AlignTab(QWidget):
         self._log_tab = log_frame
         self._bottom_tabs.addTab(log_frame, "Log")
 
+        # CSV tab
+        csv_frame = QWidget()
+        cv = QVBoxLayout(csv_frame)
+        cv.setContentsMargins(4, 4, 4, 4)
+        csv_hdr = QHBoxLayout()
+        self._csv_path_lbl = QLabel("No file yet")
+        self._csv_path_lbl.setStyleSheet("color: #888; font-size: 10px;")
+        self._csv_path_lbl.setWordWrap(True)
+        csv_hdr.addWidget(self._csv_path_lbl, 1)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setMaximumWidth(65)
+        refresh_btn.clicked.connect(self._refresh_csv)
+        csv_hdr.addWidget(refresh_btn)
+        cv.addLayout(csv_hdr)
+
+        self._csv_table = QTableWidget(0, 0)
+        self._csv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._csv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._csv_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
+        self._csv_table.setFont(
+            QFont("Menlo" if "darwin" in __import__("sys").platform else "Consolas", 9)
+        )
+        cv.addWidget(self._csv_table)
+        self._bottom_tabs.addTab(csv_frame, "CSV")
+
         right_split.addWidget(self._bottom_tabs)
 
         right_split.setStretchFactor(0, 3)   # plots — largest
@@ -286,6 +315,34 @@ class AlignTab(QWidget):
 
     def _clear_log(self):
         self._log.clear()
+
+    def _refresh_csv(self):
+        """Read the current CSV file and populate the CSV table."""
+        import csv, os
+        path = self._csv_path
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            with open(path, newline="") as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+        except Exception:
+            return
+        if not rows:
+            return
+        headers = rows[0]
+        data    = rows[1:]
+        self._csv_table.setColumnCount(len(headers))
+        self._csv_table.setHorizontalHeaderLabels(headers)
+        self._csv_table.setRowCount(len(data))
+        for r, row in enumerate(data):
+            for c, val in enumerate(row):
+                item = QTableWidgetItem(val.strip())
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._csv_table.setItem(r, c, item)
+        self._csv_table.scrollToBottom()
+        self._csv_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
 
     # ── Alignment control ────────────────────────────────────────────────────
 
@@ -306,6 +363,12 @@ class AlignTab(QWidget):
 
         simulate = self._sim_cb.isChecked()
         kwargs   = self._setup_tab.get_kwargs()
+
+        # Track CSV path for the viewer
+        import os
+        raw_path = kwargs.get("filename", "alignment_results.csv")
+        self._csv_path = os.path.abspath(raw_path)
+        self._csv_path_lbl.setText(self._csv_path)
 
         self._log.appendPlainText(
             f"\n{'═'*60}\n"
@@ -387,6 +450,7 @@ class AlignTab(QWidget):
                 )
             self._results_table.setItem(r, c, item)
         self._results_table.scrollToBottom()
+        self._refresh_csv()
 
     def _on_scan_started(self, tab_name: str):
         """Switch to the named motor tab and clear its plot for a new scan."""
