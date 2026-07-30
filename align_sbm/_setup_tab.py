@@ -508,6 +508,12 @@ class SetupTab(QWidget):
                 lbl.setText(str(value))
                 lbl.setStyleSheet("font-family: monospace;")
 
+    def set_output_filename(self, path: str):
+        self._scan_widgets["filename"].setText(path)
+
+    def get_output_filename(self) -> str:
+        return self._scan_widgets["filename"].text().strip()
+
     # ── Public API ───────────────────────────────────────────────────────────
 
     def get_kwargs(self):

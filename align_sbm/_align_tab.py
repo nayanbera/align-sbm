@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QCheckBox, QPushButton, QLabel,
     QProgressBar, QPlainTextEdit, QListWidget, QListWidgetItem,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+    QFileDialog, QMessageBox,
 )
 from .smart_scan_functions import ScanStatus
 
@@ -289,6 +290,13 @@ class AlignTab(QWidget):
         self._csv_path_lbl.setStyleSheet("color: #888; font-size: 10px;")
         self._csv_path_lbl.setWordWrap(True)
         csv_hdr.addWidget(self._csv_path_lbl, 1)
+        open_csv_btn = QPushButton("Open CSV…")
+        open_csv_btn.setToolTip(
+            "Open an existing CSV file to append new results to it.\n"
+            "Columns must match the current setup (record PVs)."
+        )
+        open_csv_btn.clicked.connect(self._open_csv)
+        csv_hdr.addWidget(open_csv_btn)
         refresh_btn = QPushButton("Refresh")
         refresh_btn.setMaximumWidth(65)
         refresh_btn.clicked.connect(self._refresh_csv)
@@ -315,6 +323,55 @@ class AlignTab(QWidget):
 
     def _clear_log(self):
         self._log.clear()
+
+    def _open_csv(self):
+        """Let the user pick an existing CSV to append to, after verifying columns."""
+        import csv, os
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open existing CSV file", "", "CSV files (*.csv);;All files (*)"
+        )
+        if not path:
+            return
+
+        # Read existing headers
+        try:
+            with open(path, newline="") as f:
+                existing_fields = csv.DictReader(f).fieldnames or []
+        except Exception as e:
+            QMessageBox.critical(self, "Open CSV", f"Could not read file:\n{e}")
+            return
+
+        # Build expected headers from current kwargs
+        kwargs = self._setup_tab.get_kwargs()
+        base = ["datetime", "MonoE", "Harmonic", "UndE", "Roll2", "X2"]
+        rpvs = kwargs.get("record_pvs") or {}
+        expected = base + list(rpvs.keys())
+
+        if sorted(existing_fields) != sorted(expected):
+            msg = (
+                f"Column mismatch — cannot append safely.\n\n"
+                f"File columns   : {', '.join(existing_fields)}\n"
+                f"Expected columns: {', '.join(expected)}\n\n"
+                f"Adjust the Record PVs in Setup or choose a compatible file."
+            )
+            QMessageBox.warning(self, "Column mismatch", msg)
+            return
+
+        # Columns match — adopt this file as the output target
+        self._csv_path = os.path.abspath(path)
+        self._csv_path_lbl.setText(self._csv_path)
+        self._setup_tab.set_output_filename(self._csv_path)
+        self._refresh_csv()
+        # Switch to CSV tab so user can see the loaded data
+        self._bottom_tabs.setCurrentIndex(
+            self._bottom_tabs.indexOf(self._csv_table.parent())
+        )
+        QMessageBox.information(
+            self, "CSV opened",
+            f"Loaded {len(existing_fields)} columns, "
+            f"{self._csv_table.rowCount()} existing row(s).\n"
+            f"New alignment results will be appended to:\n{self._csv_path}"
+        )
 
     def _refresh_csv(self):
         """Read the current CSV file and populate the CSV table."""
