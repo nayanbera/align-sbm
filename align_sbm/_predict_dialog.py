@@ -113,8 +113,9 @@ class PredictDialog(QDialog):
 
         hint = QHBoxLayout()
         hint.addWidget(QLabel(
-            "Enter MonoE (keV); Roll2 and X2 are filled automatically.  "
-            "Orange background = extrapolation outside training range."
+            "Enter MonoE (keV) → Roll2 and X2 are predicted automatically.  "
+            "Also enter Harmonic and UndE (highlighted in amber).  "
+            "Orange = extrapolation outside training range."
         ))
         hint.addStretch()
         for label, slot in [("Add Row", self._add_pred_row),
@@ -270,6 +271,9 @@ class PredictDialog(QDialog):
 
     # ── Prediction table ──────────────────────────────────────────────────────
 
+    _AMBER_BG = QColor("#4a3800")
+    _AMBER_FG = QColor("#ffc107")
+
     def _add_pred_row(self):
         self._pred_table.blockSignals(True)
         r = self._pred_table.rowCount()
@@ -277,7 +281,10 @@ class PredictDialog(QDialog):
         for c in range(5):
             item = QTableWidgetItem("")
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if c in (3, 4):
+            if c in (1, 2):          # Harmonic, UndE — user must fill in
+                item.setBackground(self._AMBER_BG)
+                item.setForeground(self._AMBER_FG)
+            elif c in (3, 4):        # Roll2, X2 — auto-predicted, read-only
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 item.setForeground(QColor("#888888"))
             self._pred_table.setItem(r, c, item)
@@ -295,6 +302,11 @@ class PredictDialog(QDialog):
     def _on_pred_cell_changed(self, row, col):
         if col == 0:
             self._recompute_one_row(row)
+        elif col in (1, 2):
+            item = self._pred_table.item(row, col)
+            if item and item.text().strip():
+                item.setBackground(QTableWidgetItem().background())
+                item.setForeground(QTableWidgetItem().foreground())
 
     def _recompute_predictions(self):
         for r in range(self._pred_table.rowCount()):
