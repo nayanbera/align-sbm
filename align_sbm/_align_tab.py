@@ -168,7 +168,7 @@ class AlignTab(QWidget):
     def _select_no_rows(self):
         self._row_list.clearSelection()
 
-    # ── Right: per-motor plot tabs + results table + log ─────────────────────
+    # ── Right: per-motor plot tabs + bottom tab (Results | Log) ─────────────
 
     def _build_right_panel(self):
         panel = QWidget()
@@ -216,12 +216,14 @@ class AlignTab(QWidget):
             lbl.setStyleSheet("color: #888;")
             right_split.addWidget(lbl)
 
-        # ── Results table ──────────────────────────────────────────────────────
+        # ── Bottom tab widget: Results | Log ───────────────────────────────────
+        self._bottom_tabs = QTabWidget()
+
+        # Results tab
         res_frame = QWidget()
         res_v = QVBoxLayout(res_frame)
-        res_v.setContentsMargins(0, 0, 0, 0)
+        res_v.setContentsMargins(4, 4, 4, 4)
         res_hdr = QHBoxLayout()
-        res_hdr.addWidget(QLabel("<b>Alignment Results</b>"))
         res_hdr.addStretch()
         clear_res_btn = QPushButton("Clear")
         clear_res_btn.setMaximumWidth(60)
@@ -237,16 +239,14 @@ class AlignTab(QWidget):
             hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
         self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._results_table.setMaximumHeight(150)
         res_v.addWidget(self._results_table)
-        right_split.addWidget(res_frame)
+        self._bottom_tabs.addTab(res_frame, "Results")
 
-        # ── Log panel ──────────────────────────────────────────────────────────
+        # Log tab
         log_frame = QWidget()
         lv = QVBoxLayout(log_frame)
-        lv.setContentsMargins(0, 0, 0, 0)
+        lv.setContentsMargins(4, 4, 4, 4)
         log_hdr = QHBoxLayout()
-        log_hdr.addWidget(QLabel("<b>Alignment Log</b>"))
         log_hdr.addStretch()
         clear_btn = QPushButton("Clear")
         clear_btn.setMaximumWidth(60)
@@ -260,11 +260,13 @@ class AlignTab(QWidget):
         font = QFont("Menlo" if "darwin" in __import__("sys").platform else "Consolas", 10)
         self._log.setFont(font)
         lv.addWidget(self._log)
-        right_split.addWidget(log_frame)
+        self._log_tab = log_frame
+        self._bottom_tabs.addTab(log_frame, "Log")
+
+        right_split.addWidget(self._bottom_tabs)
 
         right_split.setStretchFactor(0, 3)   # plots — largest
-        right_split.setStretchFactor(1, 1)   # results table — small
-        right_split.setStretchFactor(2, 2)   # log
+        right_split.setStretchFactor(1, 2)   # bottom tabs
         vbox.addWidget(right_split)
         return panel
 
@@ -298,8 +300,9 @@ class AlignTab(QWidget):
             f"{'═'*60}"
         )
 
-        # Clear results table for the new run
+        # Clear results table and switch to Log tab for the new run
         self._results_table.setRowCount(0)
+        self._bottom_tabs.setCurrentWidget(self._log_tab)
 
         from ._worker import AlignWorker
         self._worker = AlignWorker(rows, kwargs, simulate, parent=self)
