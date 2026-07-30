@@ -35,6 +35,24 @@ def caget(pv_name: str):
         return None
 
 
+def create_pv_monitor(pv_name: str, callback):
+    """Subscribe to a PV via CA monitor.
+
+    *callback(value)* is called from the CA thread on connection and on every
+    value change.  Returns an ``epics.PV`` handle (call ``pv.clear_callbacks()``
+    to unsubscribe) or ``None`` when EPICS is unavailable.
+    """
+    if not _EPICS_AVAILABLE or not isinstance(pv_name, str) or not pv_name.strip():
+        return None
+    try:
+        def _cb(pvname=None, value=None, **kw):
+            callback(value)
+        pv = epics.PV(pv_name.strip(), callback=_cb, auto_monitor=True)
+        return pv
+    except Exception:
+        return None
+
+
 # ── Result / status types ────────────────────────────────────────────────────
 
 class ScanStatus(Enum):

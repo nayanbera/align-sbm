@@ -1,5 +1,5 @@
 """Setup tab — Motors/PVs and scan parameters."""
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox,
@@ -8,18 +8,9 @@ from PyQt6.QtWidgets import (
 )
 
 
-class _ReadbackThread(QThread):
-    """Reads a dict of {key: pv_name} in a background thread and emits results."""
-    values_ready = pyqtSignal(dict)
-
-    def __init__(self, pv_map, parent=None):
-        super().__init__(parent)
-        self._pv_map = pv_map
-
-    def run(self):
-        from .smart_scan_functions import caget
-        result = {key: caget(pv) for key, pv in self._pv_map.items()}
-        self.values_ready.emit(result)
+class _PVBridge(QObject):
+    """Thread-safe bridge: CA monitor callbacks (CA thread) → Qt signals (main thread)."""
+    value_changed = pyqtSignal(str, object)   # (key, value)
 
 # ── Default PV names (ID15A2 prefix) ────────────────────────────────────────
 _PV_DEFAULTS = {
@@ -109,8 +100,9 @@ class SetupTab(QWidget):
         self._pv_widgets = {}
         self._scan_widgets = {}
         self._rbk_labels: dict = {}
-        self._rbk_thread = None
-        self._rbk_timer = None
+        self._rbk_pvs: dict = {}          # key → epics.PV handle
+        self._bridge = _PVBridge()
+        self._bridge.value_changed.connect(self._on_pv_value)
         self._build_ui()
         self._load_settings()
 
@@ -420,17 +412,16 @@ class SetupTab(QWidget):
 
         # Controls row
         ctrl = QHBoxLayout()
-        refresh_btn = QPushButton("Refresh Now")
-        refresh_btn.clicked.connect(self._refresh_readbacks)
-        self._auto_rbk_cb = QCheckBox("Auto-refresh every 2 s")
-        self._auto_rbk_cb.setToolTip("Continuously poll motor readbacks via EPICS caget")
-        self._auto_rbk_cb.toggled.connect(self._toggle_auto_readback)
-        ctrl.addWidget(refresh_btn)
-        ctrl.addWidget(self._auto_rbk_cb)
+        reconnect_btn = QPushButton("Reconnect")
+        reconnect_btn.setToolTip(
+            "Re-subscribe to PVs — use after changing PV names in Motors && PVs"
+        )
+        reconnect_btn.clicked.connect(self._subscribe_pvs)
+        ctrl.addWidget(reconnect_btn)
         ctrl.addStretch()
         vbox.addLayout(ctrl)
 
-        # Readback table
+        # Readback values
         rbk_grp = QGroupBox("Current Motor / PV Values")
         form = QFormLayout(rbk_grp)
         form.setHorizontalSpacing(20)
@@ -449,8 +440,8 @@ class SetupTab(QWidget):
         vbox.addWidget(rbk_grp)
 
         info = QLabel(
-            "Values read via <tt>epics.caget()</tt>.  "
-            "Shows <span style='color:#888'>—</span> when EPICS is unavailable (simulation mode)."
+            "Values update automatically via EPICS CA monitors — no polling.  "
+            "Shows <span style='color:#888'>—</span> when EPICS is unavailable."
         )
         info.setWordWrap(True)
         info.setStyleSheet("color: #777; font-size: 11px;")
@@ -460,11 +451,15 @@ class SetupTab(QWidget):
 
     def _on_inner_tab_changed(self, index: int):
         if self._inner_tabs.tabText(index) == "Live Readback":
-            self._refresh_readbacks()
+            self._subscribe_pvs()
+        else:
+            self._unsubscribe_pvs()
 
-    def _refresh_readbacks(self):
-        if self._rbk_thread and self._rbk_thread.isRunning():
-            return
+    def _subscribe_pvs(self):
+        """Create CA monitors for the configured motor / PV names."""
+        self._unsubscribe_pvs()
+        from .smart_scan_functions import create_pv_monitor
+        bridge = self._bridge
         pv_map = {}
         for key in ("brg2", "roll2_motor", "x2_motor"):
             pv = self._pv_widgets[key].text().strip()
@@ -474,40 +469,42 @@ class SetupTab(QWidget):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv
-        if not pv_map:
-            return
-        self._rbk_thread = _ReadbackThread(pv_map, self)
-        self._rbk_thread.values_ready.connect(self._on_readbacks)
-        self._rbk_thread.start()
-
-    def _on_readbacks(self, values: dict):
-        for key, val in values.items():
-            lbl = self._rbk_labels.get(key)
-            if lbl is None:
-                continue
-            if val is None:
+        for key, pv_name in pv_map.items():
+            lbl = self._rbk_labels[key]
+            handle = create_pv_monitor(
+                pv_name,
+                lambda val, k=key: bridge.value_changed.emit(k, val),
+            )
+            if handle is None:
                 lbl.setText("—")
                 lbl.setStyleSheet("font-family: monospace; color: #888;")
             else:
-                try:
-                    lbl.setText(f"{float(val):.6g}")
-                    lbl.setStyleSheet("font-family: monospace;")
-                except (TypeError, ValueError):
-                    lbl.setText(str(val))
-                    lbl.setStyleSheet("font-family: monospace;")
+                lbl.setText("connecting…")
+                lbl.setStyleSheet("font-family: monospace; color: #888;")
+                self._rbk_pvs[key] = handle
 
-    def _toggle_auto_readback(self, checked: bool):
-        if checked:
-            if self._rbk_timer is None:
-                from PyQt6.QtCore import QTimer
-                self._rbk_timer = QTimer(self)
-                self._rbk_timer.setInterval(2000)
-                self._rbk_timer.timeout.connect(self._refresh_readbacks)
-            self._rbk_timer.start()
-            self._refresh_readbacks()
+    def _unsubscribe_pvs(self):
+        for pv in self._rbk_pvs.values():
+            try:
+                pv.clear_callbacks()
+            except Exception:
+                pass
+        self._rbk_pvs.clear()
+
+    def _on_pv_value(self, key: str, value):
+        lbl = self._rbk_labels.get(key)
+        if lbl is None:
+            return
+        if value is None:
+            lbl.setText("—")
+            lbl.setStyleSheet("font-family: monospace; color: #888;")
         else:
-            if self._rbk_timer is not None:
-                self._rbk_timer.stop()
+            try:
+                lbl.setText(f"{float(value):.6g}")
+                lbl.setStyleSheet("font-family: monospace;")
+            except (TypeError, ValueError):
+                lbl.setText(str(value))
+                lbl.setStyleSheet("font-family: monospace;")
 
     # ── Public API ───────────────────────────────────────────────────────────
 
