@@ -63,7 +63,11 @@ class AlignWorker(QThread):
         # Patch _Interface.read to emit one point per smart_scan step.
         def _if_read_emit(iface_self):
             sig = orig_if_read(iface_self)
-            worker.point_measured.emit(float(iface_self._pos), float(sig))
+            try:
+                pos = iface_self.position()   # works for both sim and real EPICS
+            except Exception:
+                pos = getattr(iface_self, "_pos", 0.0)
+            worker.point_measured.emit(float(pos), float(sig))
             return sig
 
         # Patch _sample_loop to emit one point per fly_scan sample.
