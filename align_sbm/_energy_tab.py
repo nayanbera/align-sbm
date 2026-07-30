@@ -52,6 +52,13 @@ class EnergyTab(QWidget):
             btn = QPushButton(label)
             btn.clicked.connect(slot)
             btn_row.addWidget(btn)
+        predict_btn = QPushButton("Predict from CSV…")
+        predict_btn.setToolTip(
+            "Fit Roll2 and X2 vs MonoE from the alignment CSV history\n"
+            "and predict values for new intermediate energies."
+        )
+        predict_btn.clicked.connect(self._predict_from_csv)
+        btn_row.addWidget(predict_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -166,6 +173,14 @@ class EnergyTab(QWidget):
                     writer.writerow(dict(zip(_KEYS, row)))
         except Exception as e:
             QMessageBox.critical(self, "Save CSV", str(e))
+
+    def _predict_from_csv(self):
+        from ._predict_dialog import PredictDialog
+        csv_path = self._settings.value("last_csv_path", "")
+        dlg = PredictDialog(csv_path=csv_path, parent=self)
+        if dlg.exec():
+            for row in dlg.get_predicted_rows():
+                self._append_row(row)
 
     def _reset(self):
         self._populate(table400)
