@@ -2,10 +2,10 @@
 import numpy as np
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIntValidator
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QGroupBox, QCheckBox, QPushButton, QLabel,
+    QGroupBox, QCheckBox, QPushButton, QLabel, QLineEdit,
     QProgressBar, QPlainTextEdit, QListWidget, QListWidgetItem,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QMessageBox,
@@ -66,6 +66,15 @@ class AlignTab(QWidget):
 
         # CSV viewer state
         self._csv_path: str = ""
+
+        # Loop state
+        self._loop_active   = False
+        self._loop_abort    = False
+        self._loop_count    = 0
+        self._loop_max      = 1
+        self._loop_rows     = []
+        self._loop_kwargs   = {}
+        self._loop_simulate = False
 
         self._build_ui()
         self._restore_last_csv()
@@ -145,6 +154,22 @@ class AlignTab(QWidget):
         )
         demo_btn.clicked.connect(self._demo_scan)
         rv.addWidget(demo_btn)
+
+        loop_row = QHBoxLayout()
+        self._loop_cb = QCheckBox("Loop")
+        self._loop_cb.setToolTip("Repeat the alignment over the selected rows multiple times")
+        loop_row.addWidget(self._loop_cb)
+        loop_row.addWidget(QLabel("Iterations:"))
+        self._loop_iter_edit = QLineEdit("0")
+        self._loop_iter_edit.setFixedWidth(48)
+        self._loop_iter_edit.setValidator(QIntValidator(0, 9999, self))
+        self._loop_iter_edit.setEnabled(False)
+        self._loop_iter_edit.setToolTip("Number of times to repeat (0 = run until Abort)")
+        self._loop_cb.toggled.connect(self._loop_iter_edit.setEnabled)
+        loop_row.addWidget(self._loop_iter_edit)
+        loop_row.addWidget(QLabel("(0 = ∞)"))
+        loop_row.addStretch()
+        rv.addLayout(loop_row)
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
@@ -494,19 +519,43 @@ class AlignTab(QWidget):
         self._csv_path_lbl.setText(self._csv_path)
         self._save_csv_path()
 
-        self._log.appendPlainText(
-            f"\n{'═'*60}\n"
-            f"  Starting alignment  {'[SIMULATION]' if simulate else '[EPICS]'}\n"
-            f"  {len(rows)} energy row(s) selected\n"
-            f"{'═'*60}"
-        )
+        # Loop state
+        self._loop_active   = self._loop_cb.isChecked()
+        self._loop_abort    = False
+        self._loop_count    = 0
+        self._loop_rows     = rows
+        self._loop_kwargs   = kwargs
+        self._loop_simulate = simulate
+        try:
+            self._loop_max = int(self._loop_iter_edit.text())
+        except ValueError:
+            self._loop_max = 0
 
         # Clear results table and switch to Log tab for the new run
         self._results_table.setRowCount(0)
         self._bottom_tabs.setCurrentWidget(self._log_tab)
 
+        self._log_loop_header(iteration=1)
+        self._launch_worker()
+
+    def _log_loop_header(self, iteration: int):
+        simulate = self._loop_simulate
+        rows     = self._loop_rows
+        total    = str(self._loop_max) if self._loop_max > 0 else "∞"
+        iter_str = f"  Loop {iteration}/{total}\n" if self._loop_active else ""
+        self._log.appendPlainText(
+            f"\n{'═'*60}\n"
+            f"  Starting alignment  {'[SIMULATION]' if simulate else '[EPICS]'}\n"
+            f"{iter_str}"
+            f"  {len(rows)} energy row(s) selected\n"
+            f"{'═'*60}"
+        )
+
+    def _launch_worker(self):
         from ._worker import AlignWorker
-        self._worker = AlignWorker(rows, kwargs, simulate, parent=self)
+        self._worker = AlignWorker(
+            self._loop_rows, self._loop_kwargs, self._loop_simulate, parent=self
+        )
         self._worker.log_chunk.connect(self._on_log)
         self._worker.scan_started.connect(self._on_scan_started)
         self._worker.point_measured.connect(self._on_point_measured)
@@ -518,18 +567,24 @@ class AlignTab(QWidget):
 
         self._start_btn.setEnabled(False)
         self._abort_btn.setEnabled(True)
-        self._progress.setRange(0, 0)   # indeterminate until first step
+        self._progress.setRange(0, 0)
         self._progress.setVisible(True)
-        self._status_lbl.setText("Running…")
-        self.status_message.emit("Alignment running…")
+        iter_str = ""
+        if self._loop_active:
+            total = str(self._loop_max) if self._loop_max > 0 else "∞"
+            iter_str = f" (loop {self._loop_count + 1}/{total})"
+        self._status_lbl.setText(f"Running…{iter_str}")
+        self.status_message.emit(f"Alignment running…{iter_str}")
         self._worker.start()
 
     def _abort_alignment(self):
+        self._loop_abort = True
         if self._worker and self._worker.isRunning():
             self._worker.terminate()
             self._log.appendPlainText("\n⚠ Alignment aborted by user.")
             self._status_lbl.setText("Aborted")
             self.status_message.emit("Alignment aborted")
+        self._loop_active = False
         self._reset_buttons()
 
     def _reset_buttons(self):
@@ -745,12 +800,54 @@ class AlignTab(QWidget):
     # ── Completion / error ────────────────────────────────────────────────────
 
     def _on_done(self, results):
-        self._log.appendPlainText(
-            f"\n{'═'*60}\n  Alignment complete — {len(results)} row(s) processed.\n{'═'*60}"
+        self._loop_count += 1
+        total   = str(self._loop_max) if self._loop_max > 0 else "∞"
+        loop_str = f"  Loop {self._loop_count}/{total}\n" if self._loop_active else ""
+
+        keep_looping = (
+            self._loop_active
+            and not self._loop_abort
+            and (self._loop_max == 0 or self._loop_count < self._loop_max)
         )
-        self._status_lbl.setText(f"Done ({len(results)} rows)")
-        self.status_message.emit(f"Alignment complete: {len(results)} rows")
-        self._reset_buttons()
+
+        if keep_looping:
+            self._log.appendPlainText(
+                f"\n{'─'*60}\n"
+                f"{loop_str}"
+                f"  {len(results)} row(s) processed. Starting next loop…\n"
+                f"{'─'*60}"
+            )
+            self._status_lbl.setText(f"Loop {self._loop_count}/{total} done — restarting…")
+            self.status_message.emit(f"Loop {self._loop_count}/{total} complete, restarting…")
+            QTimer.singleShot(400, self._next_loop_iteration)
+        else:
+            if self._loop_active:
+                summary = (f"{self._loop_count} loop(s)"
+                           if self._loop_max == 0 or self._loop_count == self._loop_max
+                           else f"{self._loop_count}/{total} loop(s)")
+                self._log.appendPlainText(
+                    f"\n{'═'*60}\n"
+                    f"  All done — {summary}, {len(results)} row(s)/loop\n"
+                    f"{'═'*60}"
+                )
+                self._status_lbl.setText(f"Done ({summary})")
+                self.status_message.emit(f"Alignment complete: {summary}")
+            else:
+                self._log.appendPlainText(
+                    f"\n{'═'*60}\n  Alignment complete — {len(results)} row(s) processed.\n{'═'*60}"
+                )
+                self._status_lbl.setText(f"Done ({len(results)} rows)")
+                self.status_message.emit(f"Alignment complete: {len(results)} rows")
+            self._loop_active = False
+            self._reset_buttons()
+
+    def _next_loop_iteration(self):
+        if self._loop_abort:
+            self._loop_active = False
+            self._reset_buttons()
+            return
+        self._log_loop_header(iteration=self._loop_count + 1)
+        self._launch_worker()
 
     def _on_error(self, tb):
         self._log.appendPlainText(f"\n✗ ERROR:\n{tb}")
