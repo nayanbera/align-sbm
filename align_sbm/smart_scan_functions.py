@@ -1138,7 +1138,7 @@ def smart_scan(
             fine_pos_data: list = []
             fine_sig_data: list = []
 
-            fine_start = iter_cen - iter_half if stop < start else iter_cen + iter_half
+            fine_start = iter_cen + iter_half if stop < start else iter_cen - iter_half
             iface.move(fine_start, timeout=motor_timeout)
             if not iface._sim:
                 if verbose:
