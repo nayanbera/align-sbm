@@ -20,9 +20,10 @@ except ImportError:
 
 _MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2"]
 
-_POINT_COLOR = "#4fc3f7"
-_FIT_COLOR   = "#ef5350"
-_PEAK_COLOR  = "#ffa726"
+_POINT_COLOR      = "#4fc3f7"   # coarse scan points (blue)
+_FINE_POINT_COLOR = "#66bb6a"   # fine scan points (green)
+_FIT_COLOR        = "#ef5350"
+_PEAK_COLOR       = "#ffa726"
 _BG_COLOR    = "#1a1a2e"
 
 _RES_COLS    = ["#", "MonoE (keV)", "BRG2 ctr", "Roll2 RBV", "X2 RBV", "OK"]
@@ -48,15 +49,20 @@ class AlignTab(QWidget):
 
         # Live-point accumulation for the currently active scan
         self._current_tab  = "BRG2"
-        self._live_xs: list = []
-        self._live_ys: list = []
+        self._live_xs: list   = []
+        self._live_ys: list   = []
+        self._coarse_xs: list = []
+        self._coarse_ys: list = []
+        self._fine_xs: list   = []
+        self._fine_ys: list   = []
 
         # Per-motor pyqtgraph items (populated in _build_right_panel)
-        self._plot_widgets: dict = {}
-        self._data_items:   dict = {}
-        self._fit_items:    dict = {}
-        self._peak_lines:   dict = {}
-        self._param_items:  dict = {}
+        self._plot_widgets:     dict = {}
+        self._data_items:       dict = {}
+        self._fine_data_items:  dict = {}
+        self._fit_items:        dict = {}
+        self._peak_lines:       dict = {}
+        self._param_items:      dict = {}
 
         # Demo animation state
         self._demo_timer   = None
@@ -239,6 +245,12 @@ class AlignTab(QWidget):
                     symbolBrush=pg.mkBrush(_POINT_COLOR),
                     symbolPen=pg.mkPen(_POINT_COLOR),
                 )
+                fine_item = pw.plot(
+                    [], [], pen=None,
+                    symbol="o", symbolSize=7,
+                    symbolBrush=pg.mkBrush(_FINE_POINT_COLOR),
+                    symbolPen=pg.mkPen(_FINE_POINT_COLOR),
+                )
                 fit_item = pw.plot([], [], pen=pg.mkPen(_FIT_COLOR, width=2))
                 peak_line = pg.InfiniteLine(
                     angle=90, movable=False,
@@ -259,11 +271,12 @@ class AlignTab(QWidget):
                                          else "Consolas", 9))
                 pw.addItem(param_item)
 
-                self._plot_widgets[name] = pw
-                self._data_items[name]   = data_item
-                self._fit_items[name]    = fit_item
-                self._peak_lines[name]   = peak_line
-                self._param_items[name]  = param_item
+                self._plot_widgets[name]    = pw
+                self._data_items[name]      = data_item
+                self._fine_data_items[name] = fine_item
+                self._fit_items[name]       = fit_item
+                self._peak_lines[name]      = peak_line
+                self._param_items[name]     = param_item
 
                 self._plot_tabs.addTab(pw, name)
 
@@ -595,6 +608,7 @@ class AlignTab(QWidget):
         self._worker.log_chunk.connect(self._on_log)
         self._worker.scan_started.connect(self._on_scan_started)
         self._worker.point_measured.connect(self._on_point_measured)
+        self._worker.fine_point_measured.connect(self._on_fine_point_measured)
         self._worker.scan_finished.connect(self._on_scan_finished)
         self._worker.step_update.connect(self._on_step_update)
         self._worker.row_done.connect(self._on_row_done)
@@ -670,13 +684,19 @@ class AlignTab(QWidget):
     def _on_scan_started(self, tab_name: str):
         """Switch to the named motor tab and clear its plot for a new scan."""
         self._current_tab = tab_name
-        self._live_xs = []
-        self._live_ys = []
+        self._live_xs   = []
+        self._live_ys   = []
+        self._coarse_xs = []
+        self._coarse_ys = []
+        self._fine_xs   = []
+        self._fine_ys   = []
         if not _PG or tab_name not in self._data_items:
             return
         idx = _MOTOR_TABS.index(tab_name) if tab_name in _MOTOR_TABS else 0
         self._plot_tabs.setCurrentIndex(idx)
         self._data_items[tab_name].setData([], [])
+        if tab_name in self._fine_data_items:
+            self._fine_data_items[tab_name].setData([], [])
         self._fit_items[tab_name].setData([], [])
         self._peak_lines[tab_name].setVisible(False)
         if tab_name in self._param_items:
@@ -684,15 +704,40 @@ class AlignTab(QWidget):
         self._plot_widgets[tab_name].setTitle(f"{tab_name} — scanning…")
 
     def _on_point_measured(self, x: float, y: float):
-        """Append one live data point to the currently active plot tab."""
+        """Append one coarse-scan data point to the currently active plot tab."""
         self._live_xs.append(x)
         self._live_ys.append(y)
+        self._coarse_xs.append(x)
+        self._coarse_ys.append(y)
         if not _PG or self._current_tab not in self._data_items:
             return
-        xs = np.array(self._live_xs, dtype=float)
-        ys = np.array(self._live_ys, dtype=float)
-        self._data_items[self._current_tab].setData(xs, ys)
-        self._fit_to_data(self._plot_widgets[self._current_tab], xs, ys)
+        self._data_items[self._current_tab].setData(
+            np.array(self._coarse_xs, dtype=float),
+            np.array(self._coarse_ys, dtype=float),
+        )
+        self._fit_to_data(
+            self._plot_widgets[self._current_tab],
+            np.array(self._live_xs, dtype=float),
+            np.array(self._live_ys, dtype=float),
+        )
+
+    def _on_fine_point_measured(self, x: float, y: float):
+        """Append one fine-scan data point to the currently active plot tab."""
+        self._live_xs.append(x)
+        self._live_ys.append(y)
+        self._fine_xs.append(x)
+        self._fine_ys.append(y)
+        if not _PG or self._current_tab not in self._fine_data_items:
+            return
+        self._fine_data_items[self._current_tab].setData(
+            np.array(self._fine_xs, dtype=float),
+            np.array(self._fine_ys, dtype=float),
+        )
+        self._fit_to_data(
+            self._plot_widgets[self._current_tab],
+            np.array(self._live_xs, dtype=float),
+            np.array(self._live_ys, dtype=float),
+        )
 
     def _on_scan_finished(self, result):
         """Overlay the fit curve on the current tab after a scan completes."""
@@ -708,14 +753,22 @@ class AlignTab(QWidget):
     def _draw_fit(self, tab_name: str, result):
         if tab_name not in self._fit_items:
             return
-        # Keep all accumulated live points (coarse + fine phases).
         if self._live_xs:
             pos = np.array(self._live_xs, dtype=float)
             sig = np.array(self._live_ys, dtype=float)
+            self._data_items[tab_name].setData(
+                np.array(self._coarse_xs, dtype=float),
+                np.array(self._coarse_ys, dtype=float),
+            )
+            if tab_name in self._fine_data_items:
+                self._fine_data_items[tab_name].setData(
+                    np.array(self._fine_xs, dtype=float),
+                    np.array(self._fine_ys, dtype=float),
+                )
         else:
             pos = np.asarray(result.positions, dtype=float)
             sig = np.asarray(result.signals,   dtype=float)
-        self._data_items[tab_name].setData(pos, sig)
+            self._data_items[tab_name].setData(pos, sig)
 
         if (result.center is not None
                 and result.sigma is not None

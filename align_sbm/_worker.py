@@ -24,10 +24,11 @@ class _LogStream(io.TextIOBase):
 
 
 class AlignWorker(QThread):
-    log_chunk      = pyqtSignal(str)
-    scan_started   = pyqtSignal(str)            # tab name: BRG2 / Pitch / Roll2 / X2
-    point_measured = pyqtSignal(float, float)   # (x, y) live data point
-    scan_finished  = pyqtSignal(object)         # ScanResult after each scan completes
+    log_chunk           = pyqtSignal(str)
+    scan_started        = pyqtSignal(str)            # tab name: BRG2 / Pitch / Roll2 / X2
+    point_measured      = pyqtSignal(float, float)   # (x, y) coarse scan point
+    fine_point_measured = pyqtSignal(float, float)   # (x, y) fine scan point
+    scan_finished       = pyqtSignal(object)         # ScanResult after each scan completes
     step_update    = pyqtSignal(str, int, int)  # (label, current, total)
     row_done       = pyqtSignal(dict)           # record dict after each row completes
     done           = pyqtSignal(list)           # final results list
@@ -59,6 +60,15 @@ class AlignWorker(QThread):
         orig_fs          = _m.fly_scan
         orig_if_read     = _m._Interface.read
         orig_sample_loop = _m._sample_loop
+        orig_fine_hook   = _m._fine_scan_start_hook
+
+        # Tracks whether we are in the fine-scan phase of the current smart_scan.
+        _in_fine = [False]
+
+        def _on_fine_start():
+            _in_fine[0] = True
+
+        _m._fine_scan_start_hook = _on_fine_start
 
         # Patch _Interface.read to emit one point per smart_scan step.
         # _fresh_read() polls the detector several times at the same position;
@@ -74,7 +84,10 @@ class AlignWorker(QThread):
             last = _last_emit_pos[0]
             if last is None or abs(pos - last) > 1e-9:
                 _last_emit_pos[0] = pos
-                worker.point_measured.emit(pos, float(sig))
+                if _in_fine[0]:
+                    worker.fine_point_measured.emit(pos, float(sig))
+                else:
+                    worker.point_measured.emit(pos, float(sig))
             return sig
 
         # Patch _sample_loop to emit one point per fly_scan sample.
@@ -95,6 +108,7 @@ class AlignWorker(QThread):
 
         def _patched_ss(motor, det, start, stop, *args, **kw):
             _last_emit_pos[0] = None   # reset so first point always emits
+            _in_fine[0] = False        # start in coarse phase
             tab = worker._tab_for_motor(motor)
             worker.scan_started.emit(tab)
             _m._Interface.read = _if_read_emit
@@ -148,7 +162,8 @@ class AlignWorker(QThread):
         except Exception:
             self.error.emit(traceback.format_exc())
         finally:
-            _m.smart_scan      = orig_ss
-            _m.fly_scan        = orig_fs
-            _m._Interface.read = orig_if_read
-            _m._sample_loop    = orig_sample_loop
+            _m.smart_scan            = orig_ss
+            _m.fly_scan              = orig_fs
+            _m._Interface.read       = orig_if_read
+            _m._sample_loop          = orig_sample_loop
+            _m._fine_scan_start_hook = orig_fine_hook

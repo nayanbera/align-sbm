@@ -53,6 +53,10 @@ def create_pv_monitor(pv_name: str, callback):
         return None
 
 
+# Patchable hook: called once when smart_scan transitions to its fine-scan phase.
+# AlignWorker sets this to differentiate coarse vs fine points in the live plot.
+_fine_scan_start_hook = None
+
 # ── Result / status types ────────────────────────────────────────────────────
 
 class ScanStatus(Enum):
@@ -1114,6 +1118,8 @@ def smart_scan(
         fine_positions, fine_signals = positions, signals
         fit_ok2 = True
 
+        if _fine_scan_start_hook is not None:
+            _fine_scan_start_hook()
         for fine_iter in range(max(1, fine_scan_iter)):
             iter_half = fine_sigma_range * iter_sig
 
