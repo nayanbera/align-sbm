@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QStatusBar
 from ._setup_tab import SetupTab
 from ._energy_tab import EnergyTab
 from ._align_tab import AlignTab
+from ._help_dialog import DocsDialog, AboutDialog
 
 
 class MainWindow(QMainWindow):
@@ -38,19 +39,58 @@ class MainWindow(QMainWindow):
     def _build_menu(self):
         mb = self.menuBar()
 
+        # ── File ────────────────────────────────────────────────────────────
         file_menu = mb.addMenu("&File")
 
         save_act = QAction("&Save Config", self)
         save_act.setShortcut(QKeySequence.StandardKey.Save)
+        save_act.setStatusTip("Save current PV names and scan parameters")
         save_act.triggered.connect(self._save_all)
         file_menu.addAction(save_act)
 
         file_menu.addSeparator()
 
+        load_et_act = QAction("&Load Energy Table…", self)
+        load_et_act.setStatusTip("Load energy table rows from a CSV file")
+        load_et_act.triggered.connect(self._energy_tab._load_csv)
+        file_menu.addAction(load_et_act)
+
+        save_et_act = QAction("Save &Energy Table…", self)
+        save_et_act.setStatusTip("Save the current energy table to a CSV file")
+        save_et_act.triggered.connect(self._energy_tab._save_csv)
+        file_menu.addAction(save_et_act)
+
+        file_menu.addSeparator()
+
         quit_act = QAction("&Quit", self)
         quit_act.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_act.setStatusTip("Exit the application")
         quit_act.triggered.connect(self.close)
         file_menu.addAction(quit_act)
+
+        # ── Help ─────────────────────────────────────────────────────────────
+        help_menu = mb.addMenu("&Help")
+
+        docs_act = QAction("&Documentation", self)
+        docs_act.setShortcut(QKeySequence.StandardKey.HelpContents)
+        docs_act.setStatusTip("Open the built-in documentation")
+        docs_act.triggered.connect(self._show_docs)
+        help_menu.addAction(docs_act)
+
+        help_menu.addSeparator()
+
+        about_act = QAction("&About align-sbm", self)
+        about_act.setStatusTip("About this application")
+        about_act.triggered.connect(self._show_about)
+        help_menu.addAction(about_act)
+
+    def _show_docs(self):
+        dlg = DocsDialog(self)
+        dlg.exec()
+
+    def _show_about(self):
+        dlg = AboutDialog(self)
+        dlg.exec()
 
     def _save_all(self):
         self._setup_tab.save_settings()
