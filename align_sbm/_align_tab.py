@@ -800,6 +800,11 @@ class AlignTab(QWidget):
     # ── Completion / error ────────────────────────────────────────────────────
 
     def _on_done(self, results):
+        # Abort was already handled — don't overwrite "Aborted" status.
+        if self._loop_abort:
+            self._loop_active = False
+            return
+
         self._loop_count += 1
         total   = str(self._loop_max) if self._loop_max > 0 else "∞"
         loop_str = f"  Loop {self._loop_count}/{total}\n" if self._loop_active else ""
