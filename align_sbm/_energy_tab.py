@@ -42,6 +42,7 @@ class EnergyTab(QWidget):
             hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(len(_COLS) - 1, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setSortingEnabled(True)
         layout.addWidget(self._table)
 
         btn_row = QHBoxLayout()
@@ -156,11 +157,14 @@ class EnergyTab(QWidget):
         self._reset()
 
     def _populate(self, rows):
+        self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         for row in rows:
             self._append_row(row)
+        self._table.setSortingEnabled(True)
 
     def _append_row(self, values=None):
+        self._table.setSortingEnabled(False)
         r = self._table.rowCount()
         self._table.insertRow(r)
         defaults = [0.0] * len(_KEYS)
@@ -175,6 +179,7 @@ class EnergyTab(QWidget):
         updated_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         updated_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(r, len(_KEYS), updated_item)
+        self._table.setSortingEnabled(True)
 
     def _add_row(self):
         self._append_row()

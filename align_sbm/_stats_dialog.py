@@ -1,13 +1,14 @@
 """Statistical analysis dialog for alignment CSV data."""
 import csv
 import os
-from datetime import datetime
 
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTabWidget, QWidget, QTextBrowser, QFileDialog, QMessageBox,
+    QListWidget, QListWidgetItem, QGroupBox, QComboBox, QSizePolicy,
+    QScrollArea,
 )
 
 try:
@@ -24,31 +25,42 @@ try:
 except ImportError:
     _SCIPY = False
 
+# Columns that are grouping variables, not analysis targets
+_GROUPING_COLS = {"MonoE", "Harmonic"}
+# Columns that are always checked by default
+_DEFAULT_CHECKED = {"Roll2", "X2"}
+
 
 class StatsDialog(QDialog):
-    """Load an alignment CSV and show plots + statistical report."""
+    """Load an alignment CSV and show plots + statistical report.
+
+    All numeric columns are shown in the column selector. Roll2 and X2 are
+    pre-selected; extra record PVs appear unchecked (user selects them).
+    Plots and the per-energy / drift report sections cover every selected column.
+    """
 
     def __init__(self, csv_path="", parent=None):
         super().__init__(parent)
         self.setWindowTitle("CSV Statistical Analysis")
-        self.resize(1100, 820)
+        self.resize(1200, 900)
 
-        self._csv_path   = csv_path
-        self._data       = {}   # col → np.ndarray (numeric cols only)
-        self._num_cols   = []
-        self._n_rows     = 0
+        self._csv_path    = csv_path
+        self._data        = {}      # col → np.ndarray
+        self._num_cols    = []      # all numeric columns in the file
+        self._n_rows      = 0
         self._report_html = ""
 
         self._build_ui()
         if csv_path and os.path.isfile(csv_path):
-            self._load_and_analyze(csv_path)
+            self._load_csv(csv_path)
 
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(6)
 
-        # CSV source row
+        # ── CSV source row ────────────────────────────────────────────────────
         src = QHBoxLayout()
         src.addWidget(QLabel("CSV:"))
         self._path_edit = QLineEdit(self._csv_path)
@@ -58,7 +70,7 @@ class StatsDialog(QDialog):
         browse_btn.clicked.connect(self._browse)
         src.addWidget(browse_btn)
         analyze_btn = QPushButton("Analyze")
-        analyze_btn.clicked.connect(lambda: self._load_and_analyze(self._path_edit.text()))
+        analyze_btn.clicked.connect(lambda: self._load_csv(self._path_edit.text()))
         src.addWidget(analyze_btn)
         layout.addLayout(src)
 
@@ -66,42 +78,70 @@ class StatsDialog(QDialog):
         self._info_lbl.setStyleSheet("color: #888; font-size: 11px;")
         layout.addWidget(self._info_lbl)
 
-        # Main content tabs
+        # ── Column selector + scatter axis pickers ────────────────────────────
+        col_grp = QGroupBox("Columns to analyze")
+        col_grp.setMaximumHeight(145)
+        col_h = QHBoxLayout(col_grp)
+        col_h.setSpacing(6)
+
+        self._col_list = QListWidget()
+        self._col_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._col_list.setFlow(QListWidget.Flow.LeftToRight)
+        self._col_list.setWrapping(True)
+        self._col_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self._col_list.setSpacing(2)
+        self._col_list.setStyleSheet("QListWidget { border: none; }")
+        col_h.addWidget(self._col_list, 1)
+
+        # Scatter axis selectors
+        scatter_v = QVBoxLayout()
+        scatter_v.setSpacing(4)
+        scatter_v.addWidget(QLabel("Scatter X:"))
+        self._scatter_x = QComboBox()
+        scatter_v.addWidget(self._scatter_x)
+        scatter_v.addWidget(QLabel("Scatter Y:"))
+        self._scatter_y = QComboBox()
+        scatter_v.addWidget(self._scatter_y)
+        scatter_v.addStretch()
+        refresh_btn = QPushButton("Refresh Plots")
+        refresh_btn.setToolTip("Recompute plots and report with current column selection")
+        refresh_btn.clicked.connect(self._refresh)
+        scatter_v.addWidget(refresh_btn)
+        col_h.addLayout(scatter_v)
+
+        layout.addWidget(col_grp)
+
+        # ── Main content tabs ─────────────────────────────────────────────────
         self._tabs = QTabWidget()
 
-        # ── Plots tab ──────────────────────────────────────────────────────────
         if _MPL:
-            pw = QWidget()
-            pv = QVBoxLayout(pw)
+            self._plot_container = QWidget()
+            pv = QVBoxLayout(self._plot_container)
             pv.setContentsMargins(0, 0, 0, 0)
-            self._fig    = Figure(constrained_layout=True)
-            self._canvas = FigureCanvasQTAgg(self._fig)
-            self._canvas.setMinimumHeight(500)
-            self._toolbar = NavigationToolbar2QT(self._canvas, pw)
-            pv.addWidget(self._toolbar)
-            pv.addWidget(self._canvas)
-            self._tabs.addTab(pw, "Plots")
+            pv.setSpacing(0)
+            # Canvas and toolbar are created/replaced in _make_plots()
+            self._canvas  = None
+            self._toolbar = None
+            self._tabs.addTab(self._plot_container, "Plots")
         else:
             lbl = QLabel("matplotlib not installed — plots unavailable")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet("color: #888; font-style: italic;")
             self._tabs.addTab(lbl, "Plots")
 
-        # ── Report tab ─────────────────────────────────────────────────────────
         self._report = QTextBrowser()
         self._report.setOpenExternalLinks(False)
         self._tabs.addTab(self._report, "Report")
 
         layout.addWidget(self._tabs, 1)
 
-        # Bottom buttons
+        # ── Bottom buttons ────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         self._export_btn = QPushButton("Export Report…")
         self._export_btn.setEnabled(False)
         self._export_btn.clicked.connect(self._export_report)
         btn_row.addWidget(self._export_btn)
         btn_row.addStretch()
-        QPushButton("Close", clicked=self.reject).setParent(None)   # dummy; real one below
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.reject)
         btn_row.addWidget(close_btn)
@@ -115,9 +155,9 @@ class StatsDialog(QDialog):
         )
         if path:
             self._path_edit.setText(path)
-            self._load_and_analyze(path)
+            self._load_csv(path)
 
-    def _load_and_analyze(self, path):
+    def _load_csv(self, path):
         if not path or not os.path.isfile(path):
             self._info_lbl.setText("File not found.")
             return
@@ -138,7 +178,7 @@ class StatsDialog(QDialog):
 
         # Parse numeric columns; skip datetime
         raw = {k: [r.get(k, "").strip() for r in rows] for k in fieldnames}
-        self._data    = {}
+        self._data     = {}
         self._num_cols = []
         for k, vals in raw.items():
             if k.lower() == "datetime":
@@ -150,44 +190,128 @@ class StatsDialog(QDialog):
                 pass
 
         # Info label
-        mono = self._data.get("MonoE", np.array([]))
+        mono     = self._data.get("MonoE", np.array([]))
         unique_e = np.unique(mono) if len(mono) else np.array([])
-        e_str = ", ".join(f"{e:.4g}" for e in unique_e[:8])
+        e_str    = ", ".join(f"{e:.4g}" for e in unique_e[:8])
         if len(unique_e) > 8:
             e_str += f" … ({len(unique_e)} total)"
         loop_str = ""
         if len(unique_e):
             cnts = [int(np.sum(mono == e)) for e in unique_e]
-            if len(set(cnts)) == 1:
-                loop_str = f" • {cnts[0]} measurement(s) per energy"
-            else:
-                loop_str = f" • {min(cnts)}–{max(cnts)} measurements per energy"
+            loop_str = (
+                f" • {cnts[0]} measurement(s) per energy"
+                if len(set(cnts)) == 1
+                else f" • {min(cnts)}–{max(cnts)} measurements per energy"
+            )
         self._info_lbl.setText(
             f"{self._n_rows} rows  •  {len(self._num_cols)} numeric columns"
             + (f"  •  MonoE: {e_str} keV" if e_str else "")
             + loop_str
         )
 
-        if _MPL:
-            self._make_plots()
-        self._make_report()
+        self._rebuild_col_selector()
+        self._refresh()
         self._export_btn.setEnabled(True)
+
+    # ── Column selector ───────────────────────────────────────────────────────
+
+    def _rebuild_col_selector(self):
+        """Populate the column checklist from the loaded numeric columns."""
+        # Remember previously checked names to survive a re-load
+        prev_checked = {
+            self._col_list.item(i).text()
+            for i in range(self._col_list.count())
+            if self._col_list.item(i).checkState() == Qt.CheckState.Checked
+        }
+
+        self._col_list.clear()
+        analysis_cols = [c for c in self._num_cols if c not in _GROUPING_COLS]
+        for col in analysis_cols:
+            item = QListWidgetItem(col)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            if col in prev_checked:
+                checked = True
+            elif prev_checked:
+                checked = False   # keep previous selection when re-loading same file
+            else:
+                checked = col in _DEFAULT_CHECKED
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            self._col_list.addItem(item)
+
+        # Scatter axis selectors
+        self._scatter_x.blockSignals(True)
+        self._scatter_y.blockSignals(True)
+        prev_x = self._scatter_x.currentText()
+        prev_y = self._scatter_y.currentText()
+        self._scatter_x.clear()
+        self._scatter_y.clear()
+        self._scatter_x.addItems(analysis_cols)
+        self._scatter_y.addItems(analysis_cols)
+        # Restore or default
+        xi = self._scatter_x.findText(prev_x or "Roll2")
+        yi = self._scatter_y.findText(prev_y or "X2")
+        self._scatter_x.setCurrentIndex(max(0, xi))
+        self._scatter_y.setCurrentIndex(max(0, yi) if yi >= 0 else min(1, self._scatter_y.count() - 1))
+        self._scatter_x.blockSignals(False)
+        self._scatter_y.blockSignals(False)
+
+    def _selected_cols(self):
+        """Return the list of currently checked analysis columns."""
+        return [
+            self._col_list.item(i).text()
+            for i in range(self._col_list.count())
+            if self._col_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+
+    # ── Refresh (plots + report) ──────────────────────────────────────────────
+
+    def _refresh(self):
+        if not self._data:
+            return
+        sel = self._selected_cols()
+        if _MPL:
+            self._make_plots(sel)
+        self._make_report(sel)
 
     # ── Plots ─────────────────────────────────────────────────────────────────
 
-    def _make_plots(self):
-        self._fig.clear()
+    def _make_plots(self, sel_cols):
+        """Build a dynamic figure: 2 subplots per selected column + correlation + scatter."""
+        # Remove old canvas/toolbar
+        layout = self._plot_container.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+
         d    = self._data
         n    = self._n_rows
         idx  = np.arange(n)
         mono = d.get("MonoE", np.zeros(n))
         ue   = np.unique(mono)
-
-        # Discrete color per MonoE
-        cmap_fn = _cm.tab10
+        cmap_fn  = _cm.tab10
         color_of = {e: cmap_fn(i % 10) for i, e in enumerate(ue)}
 
-        axes = self._fig.subplots(3, 2)
+        # Layout: N rows (one per selected column) + 1 bottom row for heatmap+scatter
+        n_sel  = len(sel_cols)
+        n_rows = max(n_sel, 1) + 1   # at least 1 data row + 1 bottom row
+        fig_h  = max(6.0, 2.8 * n_rows)
+
+        fig    = Figure(figsize=(12, fig_h), constrained_layout=True)
+        canvas = FigureCanvasQTAgg(fig)
+        canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        toolbar = NavigationToolbar2QT(canvas, self._plot_container)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas)
+        self._canvas  = canvas
+        self._toolbar = toolbar
+
+        axes = fig.subplots(n_rows, 2)
+        if n_rows == 1:
+            axes = np.array([axes])   # ensure 2-D
 
         def _setup(ax, title, xlabel, ylabel):
             ax.set_title(title, fontsize=9, fontweight="bold")
@@ -196,65 +320,80 @@ class StatsDialog(QDialog):
             ax.tick_params(labelsize=7)
             ax.grid(True, alpha=0.18)
 
-        # ── Row 0: time-series Roll2 and X2 ──────────────────────────────────
-        for col, ax, label in [("Roll2", axes[0, 0], "Roll2 (mdeg)"),
-                                ("X2",    axes[0, 1], "X2 (μm)")]:
+        # ── One row per selected column ───────────────────────────────────────
+        for row_i, col in enumerate(sel_cols):
+            ax_ts  = axes[row_i, 0]   # time-series
+            ax_bar = axes[row_i, 1]   # mean ± std per energy
+
             if col in d:
+                # Time-series, coloured by MonoE
                 for e in ue:
                     mask = mono == e
-                    ax.plot(idx[mask], d[col][mask], "o-", ms=4, lw=1,
-                            color=color_of[e], label=f"{e:.4g} keV")
-                ax.legend(fontsize=6, ncol=2, loc="best")
-            _setup(ax, f"{col} vs measurement index", "Index", label)
+                    ax_ts.plot(idx[mask], d[col][mask], "o-", ms=4, lw=1,
+                               color=color_of[e], label=f"{e:.4g} keV")
+                if len(ue) <= 8:
+                    ax_ts.legend(fontsize=6, ncol=2, loc="best")
+                _setup(ax_ts, f"{col} vs measurement index", "Index", col)
 
-        # ── Row 1: mean ± std per energy ──────────────────────────────────────
-        for col, ax, label in [("Roll2", axes[1, 0], "Roll2 (mdeg)"),
-                                ("X2",    axes[1, 1], "X2 (μm)")]:
-            if col in d and len(ue):
-                xs    = np.arange(len(ue))
-                means = [d[col][mono == e].mean() for e in ue]
-                stds  = [d[col][mono == e].std()  for e in ue]
-                ax.bar(xs, means, yerr=stds,
-                       color=[color_of[e] for e in ue],
-                       capsize=4, alpha=0.82,
-                       error_kw={"elinewidth": 1.5, "capthick": 1.5})
-                ax.set_xticks(xs)
-                ax.set_xticklabels([f"{e:.4g}" for e in ue],
-                                   rotation=30, ha="right", fontsize=7)
-                ax.set_xlabel("MonoE (keV)", fontsize=8)
-            _setup(ax, f"{col}: mean ± std per energy", "MonoE (keV)", label)
+                # Bar chart
+                if len(ue):
+                    xs    = np.arange(len(ue))
+                    means = [d[col][mono == e].mean() for e in ue]
+                    stds  = [d[col][mono == e].std()  for e in ue]
+                    ax_bar.bar(xs, means, yerr=stds,
+                               color=[color_of[e] for e in ue],
+                               capsize=4, alpha=0.82,
+                               error_kw={"elinewidth": 1.5, "capthick": 1.5})
+                    ax_bar.set_xticks(xs)
+                    ax_bar.set_xticklabels([f"{e:.4g}" for e in ue],
+                                           rotation=30, ha="right", fontsize=7)
+                _setup(ax_bar, f"{col}: mean ± std per energy", "MonoE (keV)", col)
+            else:
+                ax_ts.set_visible(False)
+                ax_bar.set_visible(False)
 
-        # ── Row 2: correlation heatmap + Roll2 vs X2 scatter ─────────────────
+        # ── Bottom row: correlation heatmap (left) + scatter (right) ─────────
+        ax_corr   = axes[n_rows - 1, 0]
+        ax_scatter = axes[n_rows - 1, 1]
+
         corr_keys = [k for k in self._num_cols if k not in ("Harmonic",)]
-        ax = axes[2, 0]
         if len(corr_keys) >= 2:
-            mat  = np.corrcoef(np.array([d[k] for k in corr_keys]))
-            im   = ax.imshow(mat, vmin=-1, vmax=1, cmap="RdBu_r", aspect="auto")
-            self._fig.colorbar(im, ax=ax, shrink=0.75, label="r")
+            mat = np.corrcoef(np.array([d[k] for k in corr_keys]))
+            im  = fig.colorbar(
+                ax_corr.imshow(mat, vmin=-1, vmax=1, cmap="RdBu_r", aspect="auto"),
+                ax=ax_corr, shrink=0.75, label="r"
+            )
             ticks = range(len(corr_keys))
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(corr_keys, rotation=45, ha="right", fontsize=7)
-            ax.set_yticks(ticks)
-            ax.set_yticklabels(corr_keys, fontsize=7)
+            ax_corr.set_xticks(ticks)
+            ax_corr.set_xticklabels(corr_keys, rotation=45, ha="right", fontsize=7)
+            ax_corr.set_yticks(ticks)
+            ax_corr.set_yticklabels(corr_keys, fontsize=7)
             for i in range(len(corr_keys)):
                 for j in range(len(corr_keys)):
-                    ax.text(j, i, f"{mat[i,j]:.2f}", ha="center", va="center",
-                            fontsize=6.5,
-                            color="white" if abs(mat[i, j]) > 0.65 else "black")
-        ax.set_title("Pearson correlation matrix", fontsize=9, fontweight="bold")
-        ax.tick_params(labelsize=7)
+                    ax_corr.text(j, i, f"{mat[i,j]:.2f}", ha="center", va="center",
+                                 fontsize=6.5,
+                                 color="white" if abs(mat[i, j]) > 0.65 else "black")
+        ax_corr.set_title("Pearson correlation matrix", fontsize=9, fontweight="bold")
+        ax_corr.tick_params(labelsize=7)
 
-        ax = axes[2, 1]
-        if "Roll2" in d and "X2" in d:
+        # Scatter — user-chosen X vs Y
+        sx = self._scatter_x.currentText()
+        sy = self._scatter_y.currentText()
+        if sx in d and sy in d and sx != sy:
             for e in ue:
                 mask = mono == e
-                ax.scatter(d["Roll2"][mask], d["X2"][mask], s=28,
-                           color=color_of[e], alpha=0.85,
-                           edgecolors="none", label=f"{e:.4g} keV")
-            ax.legend(fontsize=6, loc="best")
-        _setup(ax, "Roll2 vs X2", "Roll2 (mdeg)", "X2 (μm)")
+                ax_scatter.scatter(d[sx][mask], d[sy][mask], s=28,
+                                   color=color_of[e], alpha=0.85,
+                                   edgecolors="none", label=f"{e:.4g} keV")
+            if len(ue) <= 8:
+                ax_scatter.legend(fontsize=6, loc="best")
+        elif sx in d and sy in d:
+            # Same column — just show histogram
+            ax_scatter.hist(d[sx], bins=20, alpha=0.75)
+            sy = f"Histogram of {sx}"
+        _setup(ax_scatter, f"{sx} vs {sy}", sx, sy)
 
-        self._canvas.draw()
+        canvas.draw()
 
     # ── Report ────────────────────────────────────────────────────────────────
 
@@ -277,12 +416,12 @@ class StatsDialog(QDialog):
     .warn { color: #e65100; font-weight: 600; }
     """
 
-    def _make_report(self):
-        d  = self._data
-        n  = self._n_rows
-        nc = self._num_cols
-        mono  = d.get("MonoE", np.array([]))
-        ue    = np.unique(mono) if len(mono) else np.array([])
+    def _make_report(self, sel_cols):
+        d   = self._data
+        n   = self._n_rows
+        nc  = self._num_cols
+        mono = d.get("MonoE", np.array([]))
+        ue   = np.unique(mono) if len(mono) else np.array([])
 
         def _fmt(v, p=6):
             try:
@@ -290,15 +429,19 @@ class StatsDialog(QDialog):
             except Exception:
                 return "n/a"
 
+        # Analysis columns for per-energy and drift sections
+        grp_cols = [c for c in sel_cols if c in d]
+
         parts = [f"<html><head><style>{self._CSS}</style></head><body>"]
         parts.append("<h2>Statistical Analysis Report</h2>")
         parts.append(
             f"<p><b>File:</b> {self._csv_path}<br>"
-            f"<b>Rows:</b> {n} &nbsp;&nbsp; <b>Numeric columns:</b> {len(nc)}</p>"
+            f"<b>Rows:</b> {n} &nbsp;&nbsp; <b>Numeric columns:</b> {len(nc)}<br>"
+            f"<b>Selected for analysis:</b> {', '.join(grp_cols) or '(none)'}</p>"
         )
 
-        # ── 1. Descriptive statistics ─────────────────────────────────────────
-        parts.append("<h3>1. Descriptive Statistics</h3>")
+        # ── 1. Descriptive statistics (all numeric) ───────────────────────────
+        parts.append("<h3>1. Descriptive Statistics (all numeric columns)</h3>")
         hdr = ("<tr><th>Column</th><th>N</th><th>Mean</th><th>Std Dev</th>"
                "<th>Min</th><th>25 %</th><th>Median</th><th>75 %</th><th>Max</th></tr>")
         rows = []
@@ -307,17 +450,19 @@ class StatsDialog(QDialog):
             p25, p50, p75 = np.percentile(v, [25, 50, 75])
             rows.append(
                 f"<tr><td class='lbl'>{k}</td><td>{len(v)}</td>"
-                f"<td>{_fmt(v.mean())}</td><td>{_fmt(v.std(),4)}</td>"
+                f"<td>{_fmt(v.mean())}</td><td>{_fmt(v.std(), 4)}</td>"
                 f"<td>{_fmt(v.min())}</td><td>{_fmt(p25)}</td>"
                 f"<td>{_fmt(p50)}</td><td>{_fmt(p75)}</td>"
                 f"<td>{_fmt(v.max())}</td></tr>"
             )
         parts.append(f"<table>{hdr}{''.join(rows)}</table>")
 
-        # ── 2. Per-energy group statistics ────────────────────────────────────
-        grp_cols = [k for k in ["Roll2", "X2"] if k in d]
+        # ── 2. Per-energy group statistics (selected columns) ─────────────────
         if len(ue) and len(mono) == n and grp_cols:
-            parts.append("<h3>2. Per-Energy Group Statistics</h3>")
+            parts.append(
+                f"<h3>2. Per-Energy Group Statistics "
+                f"<small>({', '.join(grp_cols)})</small></h3>"
+            )
             hdr2 = "<tr><th>MonoE (keV)</th><th>N</th>"
             for c in grp_cols:
                 hdr2 += f"<th>{c} mean</th><th>{c} std</th><th>{c} CV %</th>"
@@ -327,24 +472,27 @@ class StatsDialog(QDialog):
                 mask = mono == e
                 row = f"<tr><td class='lbl'>{e:.4g}</td><td>{mask.sum()}</td>"
                 for c in grp_cols:
-                    m = d[c][mask].mean()
-                    s = d[c][mask].std()
+                    m  = d[c][mask].mean()
+                    s  = d[c][mask].std()
                     cv = abs(s / m * 100) if m != 0 else float("nan")
                     cv_cls = "ok" if cv < 0.5 else ("warn" if cv < 2 else "")
-                    cv_s = f"{cv:.3f}" if not np.isnan(cv) else "n/a"
-                    row += f"<td>{_fmt(m)}</td><td>{_fmt(s,4)}</td><td class='{cv_cls}'>{cv_s}</td>"
+                    cv_s   = f"{cv:.3f}" if not np.isnan(cv) else "n/a"
+                    row += (f"<td>{_fmt(m)}</td><td>{_fmt(s, 4)}</td>"
+                            f"<td class='{cv_cls}'>{cv_s}</td>")
                 row += "</tr>"
                 rows2.append(row)
             parts.append(f"<table>{hdr2}{''.join(rows2)}</table>")
-            parts.append("<p><small>CV = coefficient of variation (std / |mean| × 100 %). "
-                         "<span class='ok'>Green</span> &lt; 0.5 %, "
-                         "<span class='warn'>orange</span> &lt; 2 %.</small></p>")
+            parts.append(
+                "<p><small>CV = coefficient of variation (std / |mean| × 100 %). "
+                "<span class='ok'>Green</span> &lt; 0.5 %, "
+                "<span class='warn'>orange</span> &lt; 2 %.</small></p>"
+            )
 
         # ── 3. Pearson correlation matrix ─────────────────────────────────────
         corr_keys = [k for k in nc if k not in ("Harmonic",)]
         if len(corr_keys) >= 2:
             parts.append("<h3>3. Pearson Correlation Matrix</h3>")
-            mat = np.corrcoef(np.array([d[k] for k in corr_keys]))
+            mat  = np.corrcoef(np.array([d[k] for k in corr_keys]))
             hdr3 = "<tr><th></th>" + "".join(f"<th>{k}</th>" for k in corr_keys) + "</tr>"
             rows3 = []
             for i, ki in enumerate(corr_keys):
@@ -372,21 +520,24 @@ class StatsDialog(QDialog):
                         row += "<td>1.000</td>"
                     else:
                         r, _ = _sstats.spearmanr(d[ki], d[kj])
-                        cls = "ok" if abs(r) > 0.9 else ("warn" if abs(r) > 0.7 else "")
+                        cls  = "ok" if abs(r) > 0.9 else ("warn" if abs(r) > 0.7 else "")
                         row += f"<td class='{cls}'>{r:+.3f}</td>"
                 row += "</tr>"
                 rows4.append(row)
             parts.append(f"<table>{hdr4}{''.join(rows4)}</table>")
 
-        # ── 5. Drift analysis ─────────────────────────────────────────────────
+        # ── 5. Drift analysis (selected columns) ──────────────────────────────
         if len(ue) and len(mono) == n and grp_cols:
-            parts.append("<h3>5. Drift Analysis (linear trend vs measurement index)</h3>")
+            parts.append(
+                f"<h3>5. Drift Analysis — linear trend vs measurement index "
+                f"<small>({', '.join(grp_cols)})</small></h3>"
+            )
             hdr5 = ("<tr><th>MonoE (keV)</th><th>Column</th><th>N</th>"
                     "<th>Slope (unit/step)</th><th>Intercept</th><th>R²</th></tr>")
             rows5 = []
             for e in ue:
-                mask = mono == e
-                ix = np.where(mask)[0]
+                mask  = mono == e
+                ix    = np.where(mask)[0]
                 if len(ix) < 3:
                     continue
                 ix_rel = ix - ix[0]
@@ -396,8 +547,7 @@ class StatsDialog(QDialog):
                     fitted = slope * ix_rel + intercept
                     ss_res = np.sum((y - fitted) ** 2)
                     ss_tot = np.sum((y - y.mean()) ** 2)
-                    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
-                    # Relative slope: drift / mean
+                    r2  = 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
                     rel = abs(slope / y.mean()) if y.mean() != 0 else float("nan")
                     cls = "ok" if np.isnan(rel) or rel < 1e-4 else "warn"
                     rows5.append(
@@ -414,28 +564,24 @@ class StatsDialog(QDialog):
                 "<span class='warn'>orange</span> = possible drift.</small></p>"
             )
 
-        # ── 6. Pairwise scatter summary ───────────────────────────────────────
+        # ── 6. Strongest pairwise correlations ────────────────────────────────
         if len(corr_keys) >= 2:
             parts.append("<h3>6. Strongest Pairwise Correlations</h3>")
-            mat = np.corrcoef(np.array([d[k] for k in corr_keys]))
+            mat   = np.corrcoef(np.array([d[k] for k in corr_keys]))
             pairs = []
             for i in range(len(corr_keys)):
                 for j in range(i + 1, len(corr_keys)):
                     pairs.append((abs(mat[i, j]), mat[i, j], corr_keys[i], corr_keys[j]))
             pairs.sort(reverse=True)
-            hdr6 = "<tr><th>Column A</th><th>Column B</th><th>Pearson r</th><th>Interpretation</th></tr>"
+            hdr6 = ("<tr><th>Column A</th><th>Column B</th>"
+                    "<th>Pearson r</th><th>Interpretation</th></tr>")
             rows6 = []
             for _, r, ka, kb in pairs[:10]:
-                if abs(r) > 0.9:
-                    interp = "Very strong"
-                elif abs(r) > 0.7:
-                    interp = "Strong"
-                elif abs(r) > 0.5:
-                    interp = "Moderate"
-                elif abs(r) > 0.3:
-                    interp = "Weak"
-                else:
-                    interp = "Negligible"
+                if abs(r) > 0.9:   interp = "Very strong"
+                elif abs(r) > 0.7: interp = "Strong"
+                elif abs(r) > 0.5: interp = "Moderate"
+                elif abs(r) > 0.3: interp = "Weak"
+                else:              interp = "Negligible"
                 direction = "positive" if r > 0 else "negative"
                 cls = "ok" if abs(r) > 0.9 else ("warn" if abs(r) > 0.7 else "")
                 rows6.append(
