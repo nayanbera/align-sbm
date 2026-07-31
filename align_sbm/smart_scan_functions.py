@@ -1317,8 +1317,38 @@ def smart_scan(
                 print(coarse_result)
             return coarse_result
 
-        # Build fine ScanResult with stats populated
-        fine_stats = stats_peak(fine_positions, fine_signals, mode=mode)
+        # Combine coarse + fine data, sort by position, deduplicate
+        combined_pos = np.concatenate([positions, fine_positions])
+        combined_sig = np.concatenate([signals,   fine_signals])
+        sort_idx     = np.argsort(combined_pos)
+        combined_pos = combined_pos[sort_idx]
+        combined_sig = combined_sig[sort_idx]
+        combined_pos, combined_sig = _dedup(combined_pos, combined_sig)
+
+        # Re-fit the combined dataset; fall back to fine-only result if it fails
+        if peak_method == "stats":
+            _s_comb  = stats_peak(combined_pos, combined_sig, mode=mode)
+            _c_comb  = _stats_cen(_s_comb)
+            _sw      = (_s_comb["fwhm_width"] if not np.isnan(_s_comb["fwhm_width"])
+                        else _s_comb["rms_width"])
+            if _c_comb is not None and _sw is not None and not np.isnan(_c_comb):
+                cen2, sig2 = _c_comb, _sw
+                amp2, off2 = _s_comb["peak_val"], 0.0
+                profile_used2 = "stats"
+        else:
+            _ok_c, _cc, _sc, _ac, _oc, _puc = _try_fit(
+                combined_pos, combined_sig, mode, profile=fit_profile
+            )
+            if _ok_c:
+                cen2, sig2, amp2, off2, profile_used2 = _cc, _sc, _ac, _oc, _puc
+                if verbose:
+                    print(f"  Combined fit: centre={cen2:.6g}  σ={sig2:.4g}  ({profile_used2})")
+            else:
+                if verbose:
+                    print("  ⚠ Combined fit failed — using fine-scan fit parameters.")
+
+        # Build final ScanResult using combined data
+        fine_stats = stats_peak(combined_pos, combined_sig, mode=mode)
         if profile_used2 == "supergaussian":
             fine_stats["supergaussian_p"] = _last_supergaussian_p
             if verbose:
@@ -1332,7 +1362,7 @@ def smart_scan(
 
         result = ScanResult(
             status=ScanStatus.SUCCESS,
-            positions=fine_positions, signals=fine_signals,
+            positions=combined_pos, signals=combined_sig,
             center=cen2, sigma=sig2, amplitude=amp2, offset=off2,
             profile=profile_used2,
             message=fine_msg,
