@@ -39,6 +39,15 @@ def run_alignment_row(q, row, kwargs, simulate):
     from . import smart_scan_functions as _m
     from .smart_scan_functions import align_beamline
 
+    # ── CA pre-warm (spawn creates a fresh context with no existing connections) ─
+    if not simulate:
+        try:
+            import epics
+            epics.ca.initialize_libca()
+            time.sleep(2.0)   # let CA broadcast/receive IOC beacons
+        except Exception:
+            pass
+
     # ── stdout → queue ───────────────────────────────────────────────────────
     class _QStream(io.TextIOBase):
         def write(self, text):

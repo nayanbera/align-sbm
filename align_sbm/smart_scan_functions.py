@@ -639,7 +639,7 @@ class PVAxis:
 
         if isinstance(setpoint_pv, str):
             self._sp = epics.PV(setpoint_pv)
-            if not self._sp.connect(timeout=5):
+            if not self._sp.connect(timeout=20):
                 raise ConnectionError(f"Setpoint PV not connected: {setpoint_pv}")
         else:
             self._sp = setpoint_pv
@@ -648,7 +648,7 @@ class PVAxis:
             self._rbv = self._sp
         elif isinstance(readback_pv, str):
             self._rbv = epics.PV(readback_pv)
-            if not self._rbv.connect(timeout=5):
+            if not self._rbv.connect(timeout=20):
                 raise ConnectionError(f"Readback PV not connected: {readback_pv}")
         else:
             self._rbv = readback_pv
