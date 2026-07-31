@@ -2627,26 +2627,51 @@ def align_beamline(
     if record_pvs:
         fieldnames += list(record_pvs.keys())
 
-    # Archive old file if columns changed
+    # Merge columns with any existing CSV rather than archiving it.
+    # New columns (from added record_pvs) are appended; existing rows get "0".
+    # Removed PVs whose columns already exist are kept; new rows get "0" via restval.
     if os.path.exists(filename):
         try:
             with open(filename, "r", newline="") as _f:
                 existing_fields = csv.DictReader(_f).fieldnames or []
-            if sorted(existing_fields) != sorted(fieldnames):
-                import shutil
-                ts        = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-                base, ext = os.path.splitext(filename)
-                archived  = f"{base}_archived_{ts}{ext}"
-                shutil.move(filename, archived)
-                if verbose:
-                    print(f"  ⚠ Column mismatch – old file archived as: {archived}")
         except Exception:
-            pass
+            existing_fields = []
+
+        if existing_fields:
+            # Union: preserve existing column order, append any brand-new columns
+            merged = list(existing_fields)
+            added  = []
+            for col in fieldnames:
+                if col not in merged:
+                    merged.append(col)
+                    added.append(col)
+
+            if added:
+                # Rewrite the file with the extra columns filled as "0"
+                try:
+                    with open(filename, "r", newline="") as _f:
+                        old_rows = list(csv.DictReader(_f))
+                    with open(filename, "w", newline="") as _f:
+                        _w = csv.DictWriter(_f, fieldnames=merged,
+                                            extrasaction="ignore", restval="0")
+                        _w.writeheader()
+                        for _r in old_rows:
+                            _w.writerow(_r)
+                    if verbose:
+                        print(f"  ℹ Added column(s) to CSV: {added} "
+                              f"(existing rows filled with 0)")
+                except Exception as _e:
+                    if verbose:
+                        print(f"  ⚠ Could not migrate CSV columns: {_e}")
+
+            fieldnames = merged  # use the merged set for all new rows
 
     file_exists = os.path.exists(filename)
     csv_file    = open(filename, "a", newline="")
+    # restval="0" fills in 0 for any column absent from a written record
+    # (handles the case where a record_pv was removed — column stays, value is 0).
     writer      = csv.DictWriter(csv_file, fieldnames=fieldnames,
-                                 extrasaction="ignore")
+                                 extrasaction="ignore", restval="0")
     if not file_exists:
         writer.writeheader()
 

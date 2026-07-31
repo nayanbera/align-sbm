@@ -437,7 +437,8 @@ class AlignTab(QWidget):
         open_csv_btn = QPushButton("Open CSV…")
         open_csv_btn.setToolTip(
             "Open an existing CSV file to append new results to it.\n"
-            "Columns must match the current setup (record PVs)."
+            "New record PV columns are added automatically (existing rows → 0).\n"
+            "Removed record PV columns are kept (new rows → 0)."
         )
         open_csv_btn.clicked.connect(self._open_csv)
         csv_hdr.addWidget(open_csv_btn)
@@ -499,7 +500,7 @@ class AlignTab(QWidget):
             self._refresh_csv()
 
     def _open_csv(self):
-        """Let the user pick an existing CSV to append to, after verifying columns."""
+        """Let the user pick an existing CSV to append to."""
         import csv, os
         path, _ = QFileDialog.getOpenFileName(
             self, "Open existing CSV file", "", "CSV files (*.csv);;All files (*)"
@@ -515,23 +516,32 @@ class AlignTab(QWidget):
             QMessageBox.critical(self, "Open CSV", f"Could not read file:\n{e}")
             return
 
-        # Build expected headers from current kwargs
-        kwargs = self._setup_tab.get_kwargs()
+        # Require the mandatory base columns to be present
         base = ["datetime", "MonoE", "Harmonic", "UndE", "Roll2", "X2"]
-        rpvs = kwargs.get("record_pvs") or {}
-        expected = base + list(rpvs.keys())
-
-        if sorted(existing_fields) != sorted(expected):
-            msg = (
-                f"Column mismatch — cannot append safely.\n\n"
-                f"File columns   : {', '.join(existing_fields)}\n"
-                f"Expected columns: {', '.join(expected)}\n\n"
-                f"Adjust the Record PVs in Setup or choose a compatible file."
+        missing = [c for c in base if c not in existing_fields]
+        if missing:
+            QMessageBox.critical(
+                self, "Incompatible CSV",
+                f"The file is missing required columns:\n{', '.join(missing)}\n\n"
+                f"Choose a file produced by this application."
             )
-            QMessageBox.warning(self, "Column mismatch", msg)
             return
 
-        # Columns match — adopt this file as the output target
+        # Build expected headers from current record_pvs
+        kwargs = self._setup_tab.get_kwargs()
+        rpvs   = kwargs.get("record_pvs") or {}
+        expected = base + list(rpvs.keys())
+
+        # Inform the user if columns differ — the backend will merge them automatically
+        added   = [c for c in expected      if c not in existing_fields]
+        removed = [c for c in existing_fields if c not in expected and c not in base]
+        notes   = []
+        if added:
+            notes.append(f"New column(s) will be added (existing rows → 0): {', '.join(added)}")
+        if removed:
+            notes.append(f"Column(s) no longer in Record PVs (kept, new rows → 0): {', '.join(removed)}")
+
+        # Adopt this file as the output target
         self._csv_path = os.path.abspath(path)
         self._csv_path_lbl.setText(self._csv_path)
         self._setup_tab.set_output_filename(self._csv_path)
@@ -541,11 +551,13 @@ class AlignTab(QWidget):
         self._bottom_tabs.setCurrentIndex(
             self._bottom_tabs.indexOf(self._csv_table.parent())
         )
+        note_text = ("\n\n" + "\n".join(notes)) if notes else ""
         QMessageBox.information(
             self, "CSV opened",
             f"Loaded {len(existing_fields)} columns, "
             f"{self._csv_table.rowCount()} existing row(s).\n"
             f"New alignment results will be appended to:\n{self._csv_path}"
+            f"{note_text}"
         )
 
     def _refresh_csv(self):
