@@ -630,7 +630,7 @@ class AlignTab(QWidget):
 
     def _analyze_csv(self):
         from ._stats_dialog import StatsDialog
-        dlg = StatsDialog(csv_path=self._csv_path, parent=self)
+        dlg = StatsDialog(csv_path=self._csv_path, energy_tab=self._energy_tab, parent=self)
         dlg.exec()
 
     # ── Alignment control ────────────────────────────────────────────────────
