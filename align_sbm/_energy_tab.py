@@ -134,7 +134,19 @@ class EnergyTab(QWidget):
         self._load_settings()
 
     def save_settings(self):
-        rows = self.get_table()
+        rows = []
+        for r in range(self._table.rowCount()):
+            try:
+                row = []
+                for c in range(len(_KEYS)):
+                    item = self._table.item(r, c)
+                    text = item.text().strip() if item else ""
+                    row.append(float(text) if text else 0.0)
+                ts_item = self._table.item(r, len(_KEYS))
+                row.append(ts_item.text() if ts_item else "")
+                rows.append(row)
+            except ValueError:
+                pass
         self._settings.setValue("energy_table", repr(rows))
 
     # ── private ─────────────────────────────────────────────────────────────
@@ -169,8 +181,9 @@ class EnergyTab(QWidget):
             item = QTableWidgetItem(str(v))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(r, c, item)
-        # 6th column: "Updated" — read-only, non-editable
-        updated_item = QTableWidgetItem("")
+        # 6th column: "Updated" — read-only, restored from saved value if present
+        ts_text = str(vals[len(_KEYS)]) if len(vals) > len(_KEYS) else ""
+        updated_item = QTableWidgetItem(ts_text)
         updated_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         updated_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(r, len(_KEYS), updated_item)
