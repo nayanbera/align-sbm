@@ -125,10 +125,17 @@ class AlignWorker(QThread):
     # ── Main thread loop ──────────────────────────────────────────────────────
 
     def run(self):
+        import sys
         import multiprocessing as mp
         from ._subprocess_runner import run_alignment_row
 
-        ctx = mp.get_context("spawn")   # consistent across all platforms
+        # fork on Linux: inherits loaded CA library and EPICS env so connections
+        # succeed reliably; ca.create_context() in the child gives a fresh context.
+        # spawn on Windows (fork unavailable) and macOS (works fine there).
+        if sys.platform == "win32":
+            ctx = mp.get_context("spawn")
+        else:
+            ctx = mp.get_context("fork")
 
         n_total     = len(self._table)
         all_records = []

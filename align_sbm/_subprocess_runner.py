@@ -39,14 +39,20 @@ def run_alignment_row(q, row, kwargs, simulate):
     from . import smart_scan_functions as _m
     from .smart_scan_functions import align_beamline
 
-    # ── CA pre-warm (spawn creates a fresh context with no existing connections) ─
+    # ── CA initialisation ────────────────────────────────────────────────────
+    # On Linux we use fork, so the CA library is already loaded but the
+    # context/sockets should not be shared with the parent.  create_context()
+    # starts a fresh CA context (new sockets, new background thread) while
+    # keeping the inherited EPICS environment variables intact.
+    # On Windows/macOS (spawn) the library is not yet loaded so we rely on
+    # epics.PV() auto-init; the sleep gives CA time to discover IOCs.
     if not simulate:
         try:
-            import epics
-            epics.ca.initialize_libca()
-            time.sleep(2.0)   # let CA broadcast/receive IOC beacons
+            from epics import ca as _ca
+            _ca.create_context()
         except Exception:
             pass
+        time.sleep(2.0)   # let CA broadcast/receive IOC beacons
 
     # ── stdout → queue ───────────────────────────────────────────────────────
     class _QStream(io.TextIOBase):
