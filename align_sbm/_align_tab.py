@@ -396,9 +396,10 @@ class AlignTab(QWidget):
         self._results_table = QTableWidget(0, len(_RES_COLS))
         self._results_table.setHorizontalHeaderLabels(_RES_COLS)
         hdr = self._results_table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        for c in range(1, len(_RES_COLS)):
-            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hdr.setStretchLastSection(False)
+        for c, width in enumerate([30, 90, 90, 90, 90, 40]):
+            self._results_table.setColumnWidth(c, width)
         self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         res_v.addWidget(self._results_table)
