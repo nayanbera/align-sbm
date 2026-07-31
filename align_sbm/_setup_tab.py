@@ -99,6 +99,8 @@ def _le(text=""):
 
 
 class SetupTab(QWidget):
+    config_changed = pyqtSignal()   # emitted when any scan parameter changes
+
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self._settings = settings
@@ -119,6 +121,19 @@ class SetupTab(QWidget):
         inner_tabs.addTab(self._build_pv_page(), "Motors && PVs")
         inner_tabs.addTab(self._build_scan_page(), "Scan Parameters")
         outer.addWidget(inner_tabs)
+        self._connect_scan_signals()
+
+    def _connect_scan_signals(self):
+        """Emit config_changed whenever any scan parameter widget changes."""
+        for w in self._scan_widgets.values():
+            if isinstance(w, QLineEdit):
+                w.textChanged.connect(self.config_changed)
+            elif isinstance(w, QSpinBox):
+                w.valueChanged.connect(self.config_changed)
+            elif isinstance(w, QCheckBox):
+                w.toggled.connect(self.config_changed)
+            elif isinstance(w, QComboBox):
+                w.currentIndexChanged.connect(self.config_changed)
 
     # ── Motors & PVs page ───────────────────────────────────────────────────
 

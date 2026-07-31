@@ -165,7 +165,7 @@ class AlignTab(QWidget):
         self._restore_last_csv()
 
         # Push setup-tab changes to the running worker between rows
-        self._setup_tab.value_changed.connect(self._on_setup_changed)
+        self._setup_tab.config_changed.connect(self._on_setup_changed)
 
     def _build_ui(self):
         root = QHBoxLayout(self)
@@ -1101,7 +1101,7 @@ class AlignTab(QWidget):
         self._log_loop_header(iteration=self._loop_count + 1)
         self._launch_worker()
 
-    def _on_setup_changed(self, key, value):
+    def _on_setup_changed(self):
         """Push updated scan parameters to a running worker between rows."""
         if self._worker and self._worker.isRunning():
             new_kw = self._setup_tab.get_kwargs()
