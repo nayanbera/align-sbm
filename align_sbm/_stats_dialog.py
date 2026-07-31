@@ -36,6 +36,8 @@ try:
 except ImportError:
     _SKLEARN = False
 
+from ._ml import NumpyGPR
+
 _GROUPING_COLS  = {"MonoE", "Harmonic"}
 _DEFAULT_CHECKED = {"Roll2", "X2"}
 
@@ -174,8 +176,9 @@ class StatsDialog(QDialog):
 
         ctrl_h.addWidget(QLabel("Algorithm:"))
         self._model_cb = QComboBox()
-        self._model_cb.setMinimumWidth(200)
+        self._model_cb.setMinimumWidth(220)
         models = [
+            "Gaussian Process (numpy/scipy)",   # always available
             "Polynomial deg 1 (linear)",
             "Polynomial deg 2 (quadratic)",
             "Polynomial deg 3 (cubic)",
@@ -183,14 +186,17 @@ class StatsDialog(QDialog):
         ]
         if _SKLEARN:
             models += [
-                "Gaussian Process (RBF)",
+                "Gaussian Process (sklearn RBF)",
                 "Random Forest (200 trees)",
                 "Gradient Boosting",
             ]
-        else:
-            models.append("(sklearn not installed — GP/RF/GBR unavailable)")
         self._model_cb.addItems(models)
-        self._model_cb.setCurrentText("Gaussian Process (RBF)" if _SKLEARN else "Polynomial deg 3 (cubic)")
+        self._model_cb.setCurrentIndex(0)   # numpy GP is the default
+        self._model_cb.setToolTip(
+            "Gaussian Process (numpy/scipy): always available, calibrated ±σ bands,\n"
+            "best for small datasets (5–30 energies).\n"
+            "sklearn models available after: pip install scikit-learn"
+        )
         ctrl_h.addWidget(self._model_cb)
 
         ctrl_h.addWidget(QLabel("CV:"))
@@ -700,6 +706,24 @@ class StatsDialog(QDialog):
             return {"mean_fn": mean_fn, "std_fn": std_fn,
                     "train_r2": train_r2, "cv_r2": cv_r2, "rmse": rmse}
 
+        # ── Gaussian Process (numpy/scipy) ────────────────────────────────────
+        if model_name == "Gaussian Process (numpy/scipy)":
+            gpr = NumpyGPR().fit(X_train.ravel(), y_train)
+            y_pred   = gpr.predict(X_train.ravel())
+            train_r2 = float(self._r2(y_train, y_pred))
+            rmse     = float(np.sqrt(np.mean((y_train - y_pred) ** 2)))
+            cv_r2    = float(gpr.loo_r2(X_train.ravel(), y_train))
+
+            def mean_fn(Xnew, _g=gpr):
+                return _g.predict(np.asarray(Xnew).ravel())
+
+            def std_fn(Xnew, _g=gpr):
+                _, s = _g.predict(np.asarray(Xnew).ravel(), return_std=True)
+                return s
+
+            return {"mean_fn": mean_fn, "std_fn": std_fn,
+                    "train_r2": train_r2, "cv_r2": cv_r2, "rmse": rmse}
+
         # ── sklearn models ────────────────────────────────────────────────────
         if not _SKLEARN:
             raise RuntimeError("sklearn not installed")
@@ -707,7 +731,7 @@ class StatsDialog(QDialog):
         scaler = StandardScaler()
         Xs = scaler.fit_transform(X_train)
 
-        if "Gaussian Process" in model_name:
+        if "sklearn RBF" in model_name:
             kernel = (ConstantKernel(1.0, (1e-3, 1e3))
                       * RBF(length_scale=1.0, length_scale_bounds=(1e-2, 10.0))
                       + WhiteKernel(noise_level=1e-4, noise_level_bounds=(1e-10, 1.0)))
