@@ -1,9 +1,11 @@
 """SBM Alignment GUI — main entry point."""
 import sys
 
+import traceback
+
 from PyQt6.QtCore import QSettings
 from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QStatusBar
+from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QTabWidget, QStatusBar
 
 from ._setup_tab import SetupTab
 from ._energy_tab import EnergyTab
@@ -85,8 +87,14 @@ class MainWindow(QMainWindow):
         help_menu.addAction(about_act)
 
     def _show_docs(self):
-        dlg = DocsDialog(self)
-        dlg.exec()
+        try:
+            dlg = DocsDialog(self)
+            dlg.exec()
+        except Exception:
+            tb = traceback.format_exc()
+            print(tb)
+            QMessageBox.critical(self, "Documentation error",
+                                 f"Could not open documentation:\n\n{tb}")
 
     def _show_about(self):
         dlg = AboutDialog(self)

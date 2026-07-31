@@ -143,7 +143,14 @@ Multi-select list populated from the Energy Table tab. Use **All** / **None** / 
 
 **Plot tabs (BRG2 / Pitch / Roll2 / X2)**
 
-Each motor has its own tab. During a scan, data points appear in real time (blue dots). On scan completion the fitted curve (red line) and peak marker (dashed vertical line) are overlaid. A parameter annotation in the top-right corner shows Profile, Center, FWHM, Sigma, Amplitude, Offset (and the super-Gaussian *p* exponent when applicable).
+Each motor has its own tab. During a scan, data points appear in real time with two colours:
+
+| Colour | Meaning |
+|---|---|
+| Blue (`#4fc3f7`) | Coarse sweep points |
+| Green (`#66bb6a`) | Fine scan points (narrower window centred on the coarse peak) |
+
+On scan completion the fitted curve (red line) and peak marker (dashed orange vertical line) are overlaid. A parameter annotation in the top-right corner shows Profile, Center, FWHM, Sigma, Amplitude, Offset (and the super-Gaussian *p* exponent when applicable).
 
 **Bottom tabs**
 
@@ -216,8 +223,8 @@ The CSV output file (default `alignment_results.csv`) grows one row per energy, 
 
 `smart_scan` runs in two phases:
 
-1. **Coarse sweep** — scans from `start` to `stop` in `nsteps` steps. If the peak lands near the scan edge, the range is extended automatically until the peak is fully captured.
-2. **Fine scan** — centres a narrower window (default ±3σ, 21 steps) on the coarse peak and refines the position. The motor moves to the start of the fine range *before* the detector flush, so no wasted traversal occurs between phases.
+1. **Coarse sweep** (blue dots) — scans from `start` to `stop` in `nsteps` steps. If the peak lands near the scan edge, the range is extended automatically until the peak is fully captured.
+2. **Fine scan** (green dots) — centres a narrower window (default ±3σ, 21 steps) on the coarse peak and refines the position. The motor moves to the start of the fine range *before* the detector flush, so no wasted traversal occurs between phases.
 
 ### Peak-finding logic
 

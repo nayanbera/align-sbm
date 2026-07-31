@@ -57,8 +57,7 @@ def _render_markdown(text: str) -> str:
             text,
             extensions=["tables", "fenced_code", "toc"],
         )
-    except ImportError:
-        # Fallback: wrap plain text in a <pre> block
+    except Exception:
         import html
         return f"<pre>{html.escape(text)}</pre>"
 
@@ -79,8 +78,17 @@ class DocsDialog(QDialog):
 
         md_text = _read_readme()
         body_html = _render_markdown(md_text)
-        full_html = f"<html><head><style>{_README_CSS}</style></head><body>{body_html}</body></html>"
-        browser.setHtml(full_html)
+        full_html = (
+            "<html><head>"
+            '<meta charset="utf-8">'
+            f"<style>{_README_CSS}</style>"
+            f"</head><body>{body_html}</body></html>"
+        )
+        try:
+            browser.setHtml(full_html)
+        except Exception:
+            import html as _html
+            browser.setPlainText(_html.unescape(md_text))
         layout.addWidget(browser)
 
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
