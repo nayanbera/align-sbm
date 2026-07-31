@@ -825,7 +825,7 @@ class AlignTab(QWidget):
         x2     = record.get("X2")
         if mono_e is not None and roll2 is not None and x2 is not None:
             from datetime import datetime
-            ts = datetime.now().strftime("%H:%M:%S")
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self._energy_tab.update_row_after_alignment(float(mono_e), float(roll2), float(x2), ts)
 
     def _on_scan_started(self, tab_name: str):

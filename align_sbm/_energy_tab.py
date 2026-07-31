@@ -38,9 +38,10 @@ class EnergyTab(QWidget):
         self._table = QTableWidget(0, len(_COLS))
         self._table.setHorizontalHeaderLabels(_COLS)
         hdr = self._table.horizontalHeader()
-        for c in range(len(_COLS) - 1):
-            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(len(_COLS) - 1, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hdr.setStretchLastSection(False)
+        for c, width in enumerate([90, 80, 90, 100, 90, 150]):
+            self._table.setColumnWidth(c, width)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSortingEnabled(True)
         layout.addWidget(self._table)
@@ -103,7 +104,6 @@ class EnergyTab(QWidget):
     def update_row_after_alignment(self, mono_e: float, roll2: float, x2: float,
                                    timestamp_str: str):
         """Update Roll2, X2, and the Updated timestamp for the row matching mono_e."""
-        from PyQt6.QtGui import QColor
         for r in range(self._table.rowCount()):
             item = self._table.item(r, 0)
             if item is None:
@@ -113,18 +113,13 @@ class EnergyTab(QWidget):
             except ValueError:
                 continue
             if abs(row_mono_e - mono_e) < 0.001:
-                # Update Roll2 (column 3) and X2 (column 4)
-                roll2_text = f"{roll2:.6g}"
-                x2_text    = f"{x2:.6g}"
-                for col, text in [(3, roll2_text), (4, x2_text)]:
+                for col, text in [(3, f"{roll2:.6g}"), (4, f"{x2:.6g}")]:
                     cell = self._table.item(r, col)
                     if cell is None:
                         cell = QTableWidgetItem()
                         cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         self._table.setItem(r, col, cell)
                     cell.setText(text)
-                    cell.setBackground(QColor("#1a3a1a"))
-                # Update the "Updated" column (column 5)
                 updated_col = len(_KEYS)
                 ts_item = self._table.item(r, updated_col)
                 if ts_item is None:
