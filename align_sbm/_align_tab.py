@@ -202,6 +202,8 @@ class AlignTab(QWidget):
         vbox.addWidget(run_grp)
 
         self._hold_widget = HoldConditionsWidget(self._settings)
+        self._hold_widget.suspend_triggered.connect(self._on_worker_suspend)
+        self._hold_widget.suspend_cleared.connect(self._on_worker_resume)
         vbox.addWidget(self._hold_widget)
 
         vbox.addStretch()
@@ -608,7 +610,6 @@ class AlignTab(QWidget):
         from ._worker import AlignWorker
         self._worker = AlignWorker(
             self._loop_rows, self._loop_kwargs, self._loop_simulate,
-            hold_config=self._hold_widget.get_config(),
             parent=self,
         )
         self._worker.log_chunk.connect(self._on_log)
@@ -634,6 +635,9 @@ class AlignTab(QWidget):
         self._status_lbl.setText(f"Running…{iter_str}")
         self.status_message.emit(f"Alignment running…{iter_str}")
         self._worker.start()
+        # Pre-sync: if conditions were already active before alignment started,
+        # immediately suspend the worker without waiting for the next 6s poll.
+        self._hold_widget.sync_worker(self._worker)
 
     def _abort_alignment(self):
         self._loop_abort = True
@@ -959,12 +963,24 @@ class AlignTab(QWidget):
         self.status_message.emit("Alignment error — see log")
         self._reset_buttons()
 
+    def _on_worker_suspend(self, msg: str):
+        """Called from Qt main thread when HoldConditionsWidget detects conditions active."""
+        if self._worker and self._worker.isRunning():
+            self._worker.suspend(msg)
+
+    def _on_worker_resume(self):
+        """Called from Qt main thread when HoldConditionsWidget detects conditions cleared."""
+        if self._worker and self._worker.isRunning():
+            self._worker.resume()
+
     def _on_hold_triggered(self, msg: str):
+        """Called from worker signal when it has actually entered the paused state."""
         self._status_lbl.setText(f"⏸ ON HOLD — {msg}")
         self._hold_widget.set_hold_active(msg)
         self.status_message.emit(f"ON HOLD: {msg}")
 
     def _on_hold_cleared(self):
+        """Called from worker signal when it has actually resumed."""
         self._status_lbl.setText("Hold cleared — restarting row…")
         self._hold_widget.set_hold_cleared()
         self.status_message.emit("Hold cleared — restarting")

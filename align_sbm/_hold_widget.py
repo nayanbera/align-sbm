@@ -18,13 +18,18 @@ class HoldConditionsWidget(QGroupBox):
     When the group box is checked, hold monitoring is active.
     """
 
-    config_changed = pyqtSignal()
+    config_changed    = pyqtSignal()
+    # Emitted from the Qt main thread (via _poll_timer) — never from the worker.
+    suspend_triggered = pyqtSignal(str)   # conditions are active → suspend
+    suspend_cleared   = pyqtSignal()      # conditions cleared → resume
 
     def __init__(self, settings, parent=None):
         super().__init__("Hold Conditions")
         self.setCheckable(True)
         self.setChecked(False)
-        self._settings = settings
+        self._settings         = settings
+        self._conditions_active = False
+        self._active_msg        = ""
         self._build_ui()
         self._load_settings()
 
@@ -191,12 +196,35 @@ class HoldConditionsWidget(QGroupBox):
             except Exception:
                 dot.setStyleSheet("color: #888;")
 
-        if active:
-            self._status_lbl.setText("⛔ Active: " + "; ".join(active))
+        new_active = bool(active)
+        msg        = "; ".join(active)
+
+        if new_active:
+            self._status_lbl.setText("⛔ Active: " + msg)
             self._status_lbl.setStyleSheet("font-size: 11px; color: #ef5350;")
         else:
             self._status_lbl.setText("✓ No conditions triggered")
             self._status_lbl.setStyleSheet("font-size: 11px; color: #66bb6a;")
+
+        # Emit state-change signals — used by AlignTab to call worker.suspend/resume
+        if new_active and not self._conditions_active:
+            self._active_msg = msg
+            self._conditions_active = True
+            self.suspend_triggered.emit(msg)
+        elif not new_active and self._conditions_active:
+            self._active_msg = ""
+            self._conditions_active = False
+            self.suspend_cleared.emit()
+
+    def sync_worker(self, worker):
+        """Pre-sync current hold state to a freshly created worker.
+
+        Called from _launch_worker() right after worker.start() so that if
+        conditions were already active when the alignment was launched the
+        worker is immediately suspended — without waiting for the next 6s poll.
+        """
+        if self.isChecked() and self._conditions_active:
+            worker.suspend(self._active_msg)
 
     def set_hold_active(self, msg: str):
         self._status_lbl.setText(f"⏸ ON HOLD — {msg}")
