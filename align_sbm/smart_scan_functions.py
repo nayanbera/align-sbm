@@ -25,12 +25,12 @@ except ImportError:
     warnings.warn("pyepics not found – SIMULATION mode active.", stacklevel=1)
 
 
-def caget(pv_name: str):
+def caget(pv_name: str, timeout: float = 5.0):
     """Read the current value of an EPICS PV. Returns None if unavailable."""
     if not _EPICS_AVAILABLE or not isinstance(pv_name, str) or not pv_name.strip():
         return None
     try:
-        return epics.caget(pv_name.strip(), timeout=2.0)
+        return epics.caget(pv_name.strip(), timeout=timeout)
     except Exception:
         return None
 
@@ -56,6 +56,35 @@ def create_pv_monitor(pv_name: str, callback):
 # Patchable hook: called once when smart_scan transitions to its fine-scan phase.
 # AlignWorker sets this to differentiate coarse vs fine points in the live plot.
 _fine_scan_start_hook = None
+
+
+def _eval_condition(actual, op: str, value_str: str) -> bool:
+    """Return True if the condition passes (PV satisfies the constraint).
+
+    Tries numeric comparison first; falls back to string equality for
+    string-valued PVs or when the threshold cannot be parsed as a float.
+    Quotes around *value_str* are stripped before comparison.
+    """
+    value_str = str(value_str).strip().strip("\"'")
+    try:
+        a_f = float(actual)
+        v_f = float(value_str)
+        return {
+            ">":  a_f >  v_f,
+            "<":  a_f <  v_f,
+            ">=": a_f >= v_f,
+            "<=": a_f <= v_f,
+            "==": a_f == v_f,
+            "!=": a_f != v_f,
+        }.get(op, True)
+    except (ValueError, TypeError):
+        pass
+    a_s = str(actual).strip()
+    if op == "==":
+        return a_s == value_str
+    if op == "!=":
+        return a_s != value_str
+    return True   # numeric ops on non-numeric values → pass (don't hold)
 
 # ── Result / status types ────────────────────────────────────────────────────
 

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox,
 )
 from .smart_scan_functions import ScanStatus
+from ._hold_widget import HoldConditionsWidget
 
 try:
     import pyqtgraph as pg
@@ -199,6 +200,9 @@ class AlignTab(QWidget):
         self._status_lbl.setWordWrap(True)
         rv.addWidget(self._status_lbl)
         vbox.addWidget(run_grp)
+
+        self._hold_widget = HoldConditionsWidget(self._settings)
+        vbox.addWidget(self._hold_widget)
 
         vbox.addStretch()
         self._refresh_row_list()
@@ -603,7 +607,9 @@ class AlignTab(QWidget):
     def _launch_worker(self):
         from ._worker import AlignWorker
         self._worker = AlignWorker(
-            self._loop_rows, self._loop_kwargs, self._loop_simulate, parent=self
+            self._loop_rows, self._loop_kwargs, self._loop_simulate,
+            hold_config=self._hold_widget.get_config(),
+            parent=self,
         )
         self._worker.log_chunk.connect(self._on_log)
         self._worker.scan_started.connect(self._on_scan_started)
@@ -614,6 +620,8 @@ class AlignTab(QWidget):
         self._worker.row_done.connect(self._on_row_done)
         self._worker.done.connect(self._on_done)
         self._worker.error.connect(self._on_error)
+        self._worker.hold_triggered.connect(self._on_hold_triggered)
+        self._worker.hold_cleared.connect(self._on_hold_cleared)
 
         self._start_btn.setEnabled(False)
         self._abort_btn.setEnabled(True)
@@ -630,7 +638,9 @@ class AlignTab(QWidget):
     def _abort_alignment(self):
         self._loop_abort = True
         if self._worker and self._worker.isRunning():
-            self._worker.terminate()
+            self._worker.abort()
+            if not self._worker.wait(4000):
+                self._worker.terminate()
             self._log.appendPlainText("\n⚠ Alignment aborted by user.")
             self._status_lbl.setText("Aborted")
             self.status_message.emit("Alignment aborted")
@@ -948,3 +958,16 @@ class AlignTab(QWidget):
         self._status_lbl.setText("Error — see log")
         self.status_message.emit("Alignment error — see log")
         self._reset_buttons()
+
+    def _on_hold_triggered(self, msg: str):
+        self._status_lbl.setText(f"⏸ ON HOLD — {msg}")
+        self._hold_widget.set_hold_active(msg)
+        self.status_message.emit(f"ON HOLD: {msg}")
+
+    def _on_hold_cleared(self):
+        self._status_lbl.setText("Hold cleared — restarting row…")
+        self._hold_widget.set_hold_cleared()
+        self.status_message.emit("Hold cleared — restarting")
+
+    def save_settings(self):
+        self._hold_widget.save_settings()

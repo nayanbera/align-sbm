@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
     def _save_all(self):
         self._setup_tab.save_settings()
         self._energy_tab.save_settings()
+        self._align_tab.save_settings()
 
     def closeEvent(self, event):
         self._save_all()
