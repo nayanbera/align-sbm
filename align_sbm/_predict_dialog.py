@@ -187,10 +187,15 @@ class PredictDialog(QDialog):
             )
             return
 
-        order = np.argsort(mono_e)
-        self._mono_e = np.array(mono_e)[order]
-        self._roll2  = np.array(roll2)[order]
-        self._x2     = np.array(x2)[order]
+        # Collapse repeated MonoE values to their mean so spline gets strictly
+        # increasing X (UnivariateSpline with s=0 requires unique X points).
+        mono_arr  = np.array(mono_e)
+        roll2_arr = np.array(roll2)
+        x2_arr    = np.array(x2)
+        unique_e  = np.unique(mono_arr)
+        self._mono_e = unique_e
+        self._roll2  = np.array([roll2_arr[mono_arr == e].mean() for e in unique_e])
+        self._x2     = np.array([x2_arr[mono_arr == e].mean()    for e in unique_e])
 
         self._info_lbl.setText(
             f"{n} data point{'s' if n != 1 else ''}  •  "
