@@ -38,6 +38,22 @@ align-sbm
 
 ---
 
+## Configuration files
+
+All settings (PV names, scan parameters, energy table, hold conditions) are saved automatically to an OS-native store and restored on the next launch — no manual action needed for normal use.
+
+To move a configuration to another machine or keep named presets, use the **File** menu:
+
+| Action | Description |
+|---|---|
+| **Save Config** (`Ctrl+S`) | Flush the current UI state to the local settings store immediately |
+| **Save Config As…** | Export *all* settings to a portable `.ini` file you can copy to any machine |
+| **Load Config…** | Import a `.ini` file — overwrites the local settings store and refreshes every tab live (no restart needed) |
+
+The `.ini` file is plain text and can be version-controlled or diff'd to compare beamline configurations.
+
+---
+
 ## GUI Layout
 
 The GUI has three tabs: **Setup**, **Energy Table**, and **Alignment**.
