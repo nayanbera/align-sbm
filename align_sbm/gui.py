@@ -5,7 +5,9 @@ import traceback
 
 from PyQt6.QtCore import QSettings
 from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QTabWidget, QStatusBar
+from PyQt6.QtWidgets import (
+    QApplication, QFileDialog, QMainWindow, QMessageBox, QTabWidget, QStatusBar,
+)
 
 from ._setup_tab import SetupTab
 from ._energy_tab import EnergyTab
@@ -50,6 +52,16 @@ class MainWindow(QMainWindow):
         save_act.triggered.connect(self._save_all)
         file_menu.addAction(save_act)
 
+        save_as_act = QAction("Save Config &As…", self)
+        save_as_act.setStatusTip("Export configuration to an .ini file for sharing")
+        save_as_act.triggered.connect(self._save_config_as)
+        file_menu.addAction(save_as_act)
+
+        load_cfg_act = QAction("&Load Config…", self)
+        load_cfg_act.setStatusTip("Import configuration from an .ini file")
+        load_cfg_act.triggered.connect(self._load_config_from)
+        file_menu.addAction(load_cfg_act)
+
         file_menu.addSeparator()
 
         load_et_act = QAction("&Load Energy Table…", self)
@@ -85,6 +97,40 @@ class MainWindow(QMainWindow):
         about_act.setStatusTip("About this application")
         about_act.triggered.connect(self._show_about)
         help_menu.addAction(about_act)
+
+    def _save_config_as(self):
+        self._save_all()   # flush current UI state into QSettings first
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Config As", "align_sbm_config.ini",
+            "Config files (*.ini);;All files (*)")
+        if not path:
+            return
+        if not path.endswith(".ini"):
+            path += ".ini"
+        file_cfg = QSettings(path, QSettings.Format.IniFormat)
+        for key in self._settings.allKeys():
+            file_cfg.setValue(key, self._settings.value(key))
+        file_cfg.sync()
+        self.statusBar().showMessage(f"Config saved to {path}", 5000)
+
+    def _load_config_from(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Config", "",
+            "Config files (*.ini);;All files (*)")
+        if not path:
+            return
+        file_cfg = QSettings(path, QSettings.Format.IniFormat)
+        if not file_cfg.allKeys():
+            QMessageBox.warning(self, "Load Config",
+                                "No settings found in the selected file.")
+            return
+        for key in file_cfg.allKeys():
+            self._settings.setValue(key, file_cfg.value(key))
+        # Refresh all tabs from the updated QSettings
+        self._setup_tab.reload_settings()
+        self._energy_tab.reload_settings()
+        self._align_tab.reload_settings()
+        self.statusBar().showMessage(f"Config loaded from {path}", 5000)
 
     def _show_docs(self):
         try:

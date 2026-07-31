@@ -551,6 +551,9 @@ class SetupTab(QWidget):
 
         return kwargs
 
+    def reload_settings(self):
+        self._load_settings()
+
     def save_settings(self):
         for key, w in self._pv_widgets.items():
             self._settings.setValue(f"pv/{key}", w.text())

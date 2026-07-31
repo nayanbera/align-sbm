@@ -234,6 +234,10 @@ class HoldConditionsWidget(QGroupBox):
 
     # ── Settings persistence ──────────────────────────────────────────────────
 
+    def reload_settings(self):
+        self._table.setRowCount(0)
+        self._load_settings()
+
     def save_settings(self):
         self._settings.setValue("hold_conditions", json.dumps(self.get_config()))
 

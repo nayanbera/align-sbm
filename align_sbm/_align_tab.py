@@ -969,5 +969,8 @@ class AlignTab(QWidget):
         self._hold_widget.set_hold_cleared()
         self.status_message.emit("Hold cleared — restarting")
 
+    def reload_settings(self):
+        self._hold_widget.reload_settings()
+
     def save_settings(self):
         self._hold_widget.save_settings()

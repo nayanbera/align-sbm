@@ -96,6 +96,9 @@ class EnergyTab(QWidget):
             labels.append(f"{val} keV")
         return labels
 
+    def reload_settings(self):
+        self._load_settings()
+
     def save_settings(self):
         rows = self.get_table()
         self._settings.setValue("energy_table", repr(rows))
