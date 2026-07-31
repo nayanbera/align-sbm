@@ -164,6 +164,9 @@ class AlignTab(QWidget):
         self._build_ui()
         self._restore_last_csv()
 
+        # Push setup-tab changes to the running worker between rows
+        self._setup_tab.value_changed.connect(self._on_setup_changed)
+
     def _build_ui(self):
         root = QHBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1088,8 +1091,26 @@ class AlignTab(QWidget):
             self._loop_active = False
             self._reset_buttons()
             return
+        # Re-read scan parameters for each loop iteration so changes made in
+        # the Setup tab during a run take effect at the next full iteration.
+        # Filename and record_pvs are NOT re-read here — the worker preserves
+        # them internally via update_kwargs() to keep data in one CSV file.
+        new_kw = self._setup_tab.get_kwargs()
+        self._loop_kwargs.update({k: v for k, v in new_kw.items()
+                                  if k not in ("filename", "record_pvs")})
         self._log_loop_header(iteration=self._loop_count + 1)
         self._launch_worker()
+
+    def _on_setup_changed(self, key, value):
+        """Push updated scan parameters to a running worker between rows."""
+        if self._worker and self._worker.isRunning():
+            new_kw = self._setup_tab.get_kwargs()
+            self._worker.update_kwargs(new_kw)
+            self._loop_kwargs.update({k: v for k, v in new_kw.items()
+                                      if k not in ("filename", "record_pvs")})
+            self._status_lbl.setText(
+                f"Settings updated — will apply at the next energy row"
+            )
 
     def _on_error(self, tb):
         self._log.appendPlainText(f"\n✗ ERROR:\n{tb}")

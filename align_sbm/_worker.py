@@ -23,7 +23,7 @@ class AlignWorker(QThread):
     def __init__(self, table, kwargs, simulate, parent=None):
         super().__init__(parent)
         self._table        = table
-        self._kwargs       = kwargs
+        self._kwargs       = dict(kwargs)
         self._simulate     = simulate
         self._current_proc = None          # active subprocess
         # Threading event set by the main thread via suspend()/resume().
@@ -31,6 +31,9 @@ class AlignWorker(QThread):
         # which avoids post-fork CA socket reliability issues entirely.
         self._suspend_flag = threading.Event()
         self._suspend_msg  = ""
+        # Preserved across update_kwargs() so the CSV file never changes mid-run
+        self._orig_filename   = kwargs.get("filename", "alignment_results.csv")
+        self._orig_record_pvs = kwargs.get("record_pvs", {})
 
     # ── Public API called from the main thread ────────────────────────────────
 
@@ -66,6 +69,19 @@ class AlignWorker(QThread):
     def resume(self):
         """Called from the main thread when hold conditions clear."""
         self._suspend_flag.clear()
+
+    def update_kwargs(self, kw: dict):
+        """Replace scan parameters for subsequent rows.
+
+        Called from the main thread when the user edits Setup tab settings
+        during an alignment.  The CSV filename and record_pvs are always
+        preserved from the original so that data stays in one file and the
+        column layout does not change mid-run.
+        """
+        new = dict(kw)
+        new["filename"]   = self._orig_filename
+        new["record_pvs"] = self._orig_record_pvs
+        self._kwargs = new   # atomic dict replacement — safe across threads
 
     # ── Queue message dispatcher ──────────────────────────────────────────────
 
@@ -117,9 +133,9 @@ class AlignWorker(QThread):
         all_records = []
         row_idx     = 0
 
-        kwargs_base = dict(self._kwargs)
-        raw_fname   = kwargs_base.get("filename", "alignment_results.csv")
-        kwargs_base["filename"] = os.path.abspath(raw_fname)
+        # Resolve absolute path once so it is stable even if the CWD changes.
+        self._orig_filename = os.path.abspath(self._orig_filename)
+        self._kwargs["filename"] = self._orig_filename
 
         while row_idx < n_total and not self.isInterruptionRequested():
             row = self._table[row_idx]
@@ -135,11 +151,15 @@ class AlignWorker(QThread):
                 self.hold_cleared.emit()
                 print("  ✓ Hold cleared — starting row")
 
+            # Snapshot current kwargs so any mid-run update_kwargs() call from
+            # the main thread takes effect at the next row boundary.
+            kwargs_this_row = dict(self._kwargs)
+
             # ── Spawn subprocess for this row ─────────────────────────────────
             q    = ctx.Queue()
             proc = ctx.Process(
                 target=run_alignment_row,
-                args=(q, row, dict(kwargs_base), self._simulate),
+                args=(q, row, kwargs_this_row, self._simulate),
                 daemon=True,
             )
             self._current_proc = proc
