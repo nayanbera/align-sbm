@@ -14,7 +14,7 @@ PyQt6 GUI for the Side-Bounce Monochromator (SBM) alignment protocol at ID15A2.
 - numpy ≥ 1.24
 - scipy ≥ 1.10
 - pyepics ≥ 3.5 *(optional — simulation mode works without it)*
-- matplotlib ≥ 3.7 *(optional — required for the Predict from CSV plot)*
+- matplotlib ≥ 3.7
 
 ## Installation
 
