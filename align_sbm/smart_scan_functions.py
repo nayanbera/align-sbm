@@ -35,6 +35,16 @@ def caget(pv_name: str, timeout: float = 5.0):
         return None
 
 
+def caput(pv_name: str, value, wait: bool = True, timeout: float = 10.0):
+    """Write *value* to an EPICS PV. No-op if EPICS is unavailable."""
+    if not _EPICS_AVAILABLE or not isinstance(pv_name, str) or not pv_name.strip():
+        return
+    try:
+        epics.caput(pv_name.strip(), value, wait=wait, timeout=timeout)
+    except Exception:
+        pass
+
+
 def create_pv_monitor(pv_name: str, callback):
     """Subscribe to a PV via CA monitor.
 
@@ -2691,15 +2701,11 @@ def align_beamline(
             time.sleep(5.0)
 
             # ── b) Home pitch piezo ───────────────────────────────────────────
-            if do_pitch_scan:
-                if step_cb: step_cb("Home pitch")
-                if verbose:
-                    print(f"\n  b) Setting pitch piezo to {pitch_home}")
-                _write_pv(pitch, pitch_home, f"pitch → {pitch_home}")
-                time.sleep(pitch_settle * 3)
-            else:
-                if verbose:
-                    print(f"\n  b) Pitch scan disabled – skipping")
+            if step_cb: step_cb("Home pitch")
+            if verbose:
+                print(f"\n  b) Setting pitch piezo to {pitch_home}")
+            _write_pv(pitch, pitch_home, f"pitch → {pitch_home}")
+            time.sleep(pitch_settle * 3)
 
             # ── c) BRG2 smart_scan → move to peak_pos ────────────────────────
             if step_cb: step_cb("BRG2 scan")

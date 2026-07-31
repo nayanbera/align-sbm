@@ -9,6 +9,12 @@ from PyQt6.QtWidgets import (
 )
 
 
+class _NoScrollSpinBox(QSpinBox):
+    """QSpinBox that ignores mouse-wheel events to prevent accidental value changes."""
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 class _PVBridge(QObject):
     """Thread-safe bridge: CA monitor callbacks (CA thread) → Qt signals (main thread)."""
     value_changed = pyqtSignal(str, object)   # (key, value)
@@ -81,7 +87,7 @@ def _dbl(val, lo=-1e6, hi=1e6, decimals=6, step=0.001):
 
 
 def _int(val, lo=1, hi=999):
-    w = QSpinBox()
+    w = _NoScrollSpinBox()
     w.setRange(lo, hi)
     w.setValue(val)
     return w

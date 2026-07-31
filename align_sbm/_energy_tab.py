@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 
 from .smart_scan_functions import table400
 
-_COLS = ["MonoE (keV)", "Harmonic", "UndE (eV)", "Roll2 (mdeg)", "X2 (μm)"]
+_COLS = ["MonoE (keV)", "Harmonic", "UndE (eV)", "Roll2 (mdeg)", "X2 (μm)", "Updated"]
 _KEYS = ["MonoE", "Harmonic", "UndE", "Roll2", "X2"]
 
 
@@ -37,7 +37,10 @@ class EnergyTab(QWidget):
 
         self._table = QTableWidget(0, len(_COLS))
         self._table.setHorizontalHeaderLabels(_COLS)
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        hdr = self._table.horizontalHeader()
+        for c in range(len(_COLS) - 1):
+            hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(len(_COLS) - 1, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self._table)
 
@@ -70,7 +73,7 @@ class EnergyTab(QWidget):
         for r in range(self._table.rowCount()):
             try:
                 row = []
-                for c in range(self._table.columnCount()):
+                for c in range(len(_KEYS)):   # only the 5 data columns, skip "Updated"
                     item = self._table.item(r, c)
                     text = item.text().strip() if item else ""
                     row.append(float(text) if text else 0.0)
@@ -95,6 +98,41 @@ class EnergyTab(QWidget):
             val = item.text() if item else "?"
             labels.append(f"{val} keV")
         return labels
+
+    def update_row_after_alignment(self, mono_e: float, roll2: float, x2: float,
+                                   timestamp_str: str):
+        """Update Roll2, X2, and the Updated timestamp for the row matching mono_e."""
+        from PyQt6.QtGui import QColor
+        for r in range(self._table.rowCount()):
+            item = self._table.item(r, 0)
+            if item is None:
+                continue
+            try:
+                row_mono_e = float(item.text().strip())
+            except ValueError:
+                continue
+            if abs(row_mono_e - mono_e) < 0.001:
+                # Update Roll2 (column 3) and X2 (column 4)
+                roll2_text = f"{roll2:.6g}"
+                x2_text    = f"{x2:.6g}"
+                for col, text in [(3, roll2_text), (4, x2_text)]:
+                    cell = self._table.item(r, col)
+                    if cell is None:
+                        cell = QTableWidgetItem()
+                        cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self._table.setItem(r, col, cell)
+                    cell.setText(text)
+                    cell.setBackground(QColor("#1a3a1a"))
+                # Update the "Updated" column (column 5)
+                updated_col = len(_KEYS)
+                ts_item = self._table.item(r, updated_col)
+                if ts_item is None:
+                    ts_item = QTableWidgetItem()
+                    ts_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                    ts_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self._table.setItem(r, updated_col, ts_item)
+                ts_item.setText(timestamp_str)
+                break
 
     def reload_settings(self):
         self._load_settings()
@@ -125,12 +163,18 @@ class EnergyTab(QWidget):
     def _append_row(self, values=None):
         r = self._table.rowCount()
         self._table.insertRow(r)
-        defaults = [0.0] * len(_COLS)
-        vals = values or defaults
-        for c, v in enumerate(vals):
+        defaults = [0.0] * len(_KEYS)
+        vals = list(values) if values is not None else defaults
+        # Fill the 5 data columns
+        for c, v in enumerate(vals[:len(_KEYS)]):
             item = QTableWidgetItem(str(v))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(r, c, item)
+        # 6th column: "Updated" — read-only, non-editable
+        updated_item = QTableWidgetItem("")
+        updated_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        updated_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._table.setItem(r, len(_KEYS), updated_item)
 
     def _add_row(self):
         self._append_row()

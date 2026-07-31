@@ -1,7 +1,7 @@
 """Alignment runner tab — controls, live log, and per-motor scan plots."""
 import numpy as np
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QIntValidator
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -20,6 +20,84 @@ except ImportError:
     _PG = False
 
 _MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2"]
+
+
+class _MoveToEnergyThread(QThread):
+    """Background thread that moves all motors to the positions of a selected energy row."""
+    log_chunk = pyqtSignal(str)
+    done      = pyqtSignal()
+
+    def __init__(self, row, kwargs, simulate, parent=None):
+        super().__init__(parent)
+        self._row      = row       # [MonoE, Harmonic, UndE, Roll2, X2]
+        self._kwargs   = kwargs
+        self._simulate = simulate
+
+    def run(self):
+        try:
+            self._do_move()
+        except Exception:
+            import traceback
+            self.log_chunk.emit(f"\n[MoveToEnergy] ERROR:\n{traceback.format_exc()}")
+        finally:
+            self.done.emit()
+
+    def _do_move(self):
+        from .smart_scan_functions import caput
+        kw  = self._kwargs
+        row = self._row
+        mono_e, harmonic, und_e, roll2, x2 = (
+            row[0], row[1], row[2], row[3], row[4]
+        )
+
+        self.log_chunk.emit(
+            f"\n[MoveToEnergy] Target: MonoE={mono_e} keV  Harmonic={harmonic}"
+            f"  UndE={und_e} eV  Roll2={roll2}  X2={x2}\n"
+        )
+
+        if self._simulate:
+            self.log_chunk.emit(
+                f"[MoveToEnergy] SIMULATE — would set:\n"
+                f"  {kw.get('mono_e_pv','')}  → {mono_e}\n"
+                f"  {kw.get('harmonic_pv','')} → {harmonic}\n"
+                f"  {kw.get('und_e_pv','')}    → {und_e}\n"
+                f"  {kw.get('und_start_pv','')} → 1\n"
+                f"  {kw.get('roll2_energy_pv','')} → {roll2}\n"
+                f"  {kw.get('x2_energy_pv','')}    → {x2}\n"
+                f"  roll2_motor ({kw.get('roll2_motor','')}) → {roll2}\n"
+                f"  x2_motor    ({kw.get('x2_motor','')})    → {x2}\n"
+            )
+            return
+
+        # Set energy PVs
+        for pv_key, value, label in [
+            ("mono_e_pv",      mono_e,   "mono energy"),
+            ("harmonic_pv",    harmonic, "undulator harmonic"),
+            ("und_e_pv",       und_e,    "undulator energy"),
+            ("und_start_pv",   1,        "undulator start"),
+            ("roll2_energy_pv", roll2,   "Roll2 energy set"),
+            ("x2_energy_pv",    x2,      "X2 energy set"),
+        ]:
+            pv = kw.get(pv_key, "")
+            if pv:
+                self.log_chunk.emit(f"[MoveToEnergy] caput {pv} → {value}\n")
+                caput(pv, value)
+
+        import time; time.sleep(0.5)
+
+        # Move motors
+        for motor_key, value, label in [
+            ("roll2_motor", roll2, "Roll2"),
+            ("x2_motor",    x2,   "X2"),
+        ]:
+            motor = kw.get(motor_key, "")
+            if motor:
+                pv = motor + ".VAL"
+                self.log_chunk.emit(f"[MoveToEnergy] Moving {label}: caput {pv} → {value}\n")
+                caput(pv, value, wait=True)
+
+        self.log_chunk.emit("[MoveToEnergy] Done.\n")
+
 
 _POINT_COLOR      = "#4fc3f7"   # coarse scan points (blue)
 _FINE_POINT_COLOR = "#66bb6a"   # fine scan points (green)
@@ -154,6 +232,13 @@ class AlignTab(QWidget):
         )
         self._abort_btn.clicked.connect(self._abort_alignment)
         rv.addWidget(self._abort_btn)
+
+        self._move_btn = QPushButton("Move to Energy")
+        self._move_btn.setToolTip(
+            "Move all motors to the selected energy row positions without running any scans"
+        )
+        self._move_btn.clicked.connect(self._move_to_energy)
+        rv.addWidget(self._move_btn)
 
         demo_btn = QPushButton("Demo Scan (sim)")
         demo_btn.setToolTip(
@@ -626,6 +711,7 @@ class AlignTab(QWidget):
 
         self._start_btn.setEnabled(False)
         self._abort_btn.setEnabled(True)
+        self._move_btn.setEnabled(False)
         self._progress.setRange(0, 0)
         self._progress.setVisible(True)
         iter_str = ""
@@ -654,7 +740,33 @@ class AlignTab(QWidget):
     def _reset_buttons(self):
         self._start_btn.setEnabled(True)
         self._abort_btn.setEnabled(False)
+        self._move_btn.setEnabled(True)
         self._progress.setVisible(False)
+
+    def _move_to_energy(self):
+        """Move all motors to the first selected energy row without running alignment scans."""
+        selected = self._row_list.selectedItems()
+        if not selected:
+            self._log.appendPlainText("[MoveToEnergy] No energy row selected.")
+            return
+
+        idx = selected[0].data(Qt.ItemDataRole.UserRole)
+        all_rows = self._energy_tab.get_table()
+        if idx >= len(all_rows):
+            self._log.appendPlainText("[MoveToEnergy] Selected row index out of range.")
+            return
+        row    = all_rows[idx]
+        kwargs = self._setup_tab.get_kwargs()
+        simulate = self._sim_cb.isChecked()
+
+        self._move_btn.setEnabled(False)
+        self._bottom_tabs.setCurrentWidget(self._log_tab)
+
+        thread = _MoveToEnergyThread(row, kwargs, simulate, parent=self)
+        thread.log_chunk.connect(self._on_log)
+        thread.done.connect(lambda: self._move_btn.setEnabled(True))
+        thread.done.connect(thread.deleteLater)
+        thread.start()
 
     # ── Worker signal handlers ────────────────────────────────────────────────
 
@@ -694,6 +806,15 @@ class AlignTab(QWidget):
             self._results_table.setItem(r, c, item)
         self._results_table.scrollToBottom()
         self._refresh_csv()
+
+        # Update Roll2 and X2 in the energy table
+        mono_e = record.get("MonoE")
+        roll2  = record.get("Roll2")
+        x2     = record.get("X2")
+        if mono_e is not None and roll2 is not None and x2 is not None:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H:%M:%S")
+            self._energy_tab.update_row_after_alignment(float(mono_e), float(roll2), float(x2), ts)
 
     def _on_scan_started(self, tab_name: str):
         """Switch to the named motor tab and clear its plot for a new scan."""
