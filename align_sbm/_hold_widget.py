@@ -42,12 +42,13 @@ class HoldConditionsWidget(QGroupBox):
 
         # Logic selector
         logic_row = QHBoxLayout()
-        logic_row.addWidget(QLabel("Suspend if:"))
+        logic_row.addWidget(QLabel("Suspend when:"))
         self._logic_cb = QComboBox()
-        self._logic_cb.addItems(["any condition fails", "all conditions fail"])
+        self._logic_cb.addItems(["any condition is met", "all conditions are met"])
         self._logic_cb.setToolTip(
-            "'any' — hold when at least one condition is violated (default)\n"
-            "'all' — hold only when every condition is violated simultaneously"
+            "'any' — hold when at least one condition evaluates to True (default)\n"
+            "'all' — hold only when every condition is True simultaneously\n\n"
+            "Example: 'SR:Current < 10' suspends when current drops below 10."
         )
         self._logic_cb.currentIndexChanged.connect(self.config_changed)
         logic_row.addWidget(self._logic_cb)
@@ -155,7 +156,7 @@ class HoldConditionsWidget(QGroupBox):
 
         from .smart_scan_functions import _eval_condition
 
-        failures = []
+        active = []
         for r in range(self._table.rowCount()):
             pv_item  = self._table.item(r, 0)
             val_item = self._table.item(r, 2)
@@ -182,18 +183,19 @@ class HoldConditionsWidget(QGroupBox):
                 if actual is None:
                     dot.setStyleSheet("color: #888;")
                     continue
-                passes = _eval_condition(actual, op, val)
-                dot.setStyleSheet("color: #2e7d32;" if passes else "color: #c62828;")
-                if not passes:
-                    failures.append(f"{pv} {op} {val} (={actual})")
+                # red dot = condition is True = suspension would trigger
+                triggered = _eval_condition(actual, op, val)
+                dot.setStyleSheet("color: #c62828;" if triggered else "color: #2e7d32;")
+                if triggered:
+                    active.append(f"{pv} {op} {val} (={actual})")
             except Exception:
                 dot.setStyleSheet("color: #888;")
 
-        if failures:
-            self._status_lbl.setText("⛔ " + "; ".join(failures))
+        if active:
+            self._status_lbl.setText("⛔ Active: " + "; ".join(active))
             self._status_lbl.setStyleSheet("font-size: 11px; color: #ef5350;")
         else:
-            self._status_lbl.setText("✓ All conditions satisfied")
+            self._status_lbl.setText("✓ No conditions triggered")
             self._status_lbl.setStyleSheet("font-size: 11px; color: #66bb6a;")
 
     def set_hold_active(self, msg: str):
@@ -228,7 +230,7 @@ class HoldConditionsWidget(QGroupBox):
             })
         return {
             "enabled":    self.isChecked(),
-            "logic":      "any_fail" if self._logic_cb.currentIndex() == 0 else "all_fail",
+            "logic":      "any_triggered" if self._logic_cb.currentIndex() == 0 else "all_triggered",
             "conditions": conditions,
         }
 
@@ -250,8 +252,13 @@ class HoldConditionsWidget(QGroupBox):
         except Exception:
             return
         self.setChecked(bool(cfg.get("enabled", False)))
-        self._logic_cb.setCurrentIndex(
-            0 if cfg.get("logic", "any_fail") == "any_fail" else 1)
+        logic = cfg.get("logic", "any_triggered")
+        # backward-compat: map old "any_fail"/"all_fail" keys to new names
+        if logic == "any_fail":
+            logic = "any_triggered"
+        elif logic == "all_fail":
+            logic = "all_triggered"
+        self._logic_cb.setCurrentIndex(0 if logic == "any_triggered" else 1)
         for cond in cfg.get("conditions", []):
             self._add_row(
                 pv=cond.get("pv", ""),

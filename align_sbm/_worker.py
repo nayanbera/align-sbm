@@ -47,7 +47,11 @@ class AlignWorker(QThread):
     # ── Hold condition helpers ────────────────────────────────────────────────
 
     def _check_hold(self) -> list:
-        """Return failure strings. Empty → all conditions pass (no hold)."""
+        """Return triggered-condition strings. Empty → no hold needed.
+
+        Semantics: hold when the condition expression evaluates to *True*.
+        Example: 'SR:Current < 10' triggers when current drops below 10.
+        """
         cfg = self._hold_config
         if not cfg.get("enabled", False):
             return []
@@ -66,22 +70,24 @@ class AlignWorker(QThread):
         if not conditions:
             return []
 
-        logic    = cfg.get("logic", "any_fail")
-        failures = []
+        logic     = cfg.get("logic", "any_triggered")
+        triggered = []
         for cond in conditions:
             try:
                 actual = epics.caget(cond["pv"].strip(), timeout=1.0)
-                if actual is None or not _eval_condition(actual, cond["op"], cond["value"]):
-                    failures.append(
+                if actual is not None and _eval_condition(actual, cond["op"], cond["value"]):
+                    triggered.append(
                         f"{cond['pv']} {cond['op']} {cond['value']} (actual={actual})"
                     )
-            except Exception:
-                pass   # transient read error — don't trigger hold
+            except Exception as e:
+                self.log_chunk.emit(f"[Hold] CA read error {cond['pv']}: {e}\n")
 
-        if logic == "any_fail":
-            return failures
-        # "all_fail": only hold when every enabled condition fails simultaneously
-        return failures if len(failures) >= len(conditions) else []
+        # "any_triggered" (default): hold when at least one condition is True
+        # "all_triggered": hold only when every enabled condition is True simultaneously
+        # backward-compat: accept old keys "any_fail" / "all_fail"
+        if logic in ("any_triggered", "any_fail"):
+            return triggered
+        return triggered if len(triggered) >= len(conditions) else []
 
     def _wait_for_clear(self):
         """Block, polling every 2 s, until all hold conditions pass (or abort)."""
