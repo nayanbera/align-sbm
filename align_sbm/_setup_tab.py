@@ -23,6 +23,7 @@ class _PVBridge(QObject):
 _PV_DEFAULTS = {
     "pv_prefix":      "ID15A2:",
     "detector":       "ID15A2:det:Signal",
+    "monitor_pv":     "",
     "brg2":           "ID15A2:BRG2",
     "roll2_motor":    "ID15A2:Roll2",
     "x2_motor":       "ID15A2:X2",
@@ -196,6 +197,7 @@ class SetupTab(QWidget):
         pvf = QFormLayout(pv_grp)
         for key, label, tip in [
             ("detector",        "Detector",           "Scalar detector readback PV"),
+            ("monitor_pv",      "Monitor (normalize)", "Monitor detector PV — when set, all scan signals are divided by this value before fitting and plotting (optional)"),
             ("pitch_pv",        "Pitch piezo SP",     "Pitch piezo setpoint PV (PVAxis)"),
             ("slit_v_pv",       "Vertical slit SP",   "Vertical slit setpoint PV"),
             ("slit_h_pv",       "Horizontal slit SP", "Horizontal slit setpoint PV"),
@@ -480,7 +482,7 @@ class SetupTab(QWidget):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv + ".RBV"
-        for key in ("detector", "pitch_pv", "slit_v_pv", "slit_h_pv",
+        for key in ("detector", "monitor_pv", "pitch_pv", "slit_v_pv", "slit_h_pv",
                     "mono_e_pv", "harmonic_pv", "und_e_pv", "und_start_pv",
                     "roll2_energy_pv", "x2_energy_pv"):
             pv = self._pv_widgets[key].text().strip()

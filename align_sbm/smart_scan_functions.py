@@ -718,11 +718,13 @@ class _Interface:
     def __init__(self, motor, det,
                  simulate: bool, sim_center: float,
                  sim_sigma: float, sim_amp: float,
-                 sim_offset: float, sim_noise: float):
+                 sim_offset: float, sim_noise: float,
+                 monitor_pv: str = ""):
         self._sim   = simulate or not _EPICS_AVAILABLE
         self._pos   = 0.0
         self._pvaxis = None
         self._motor  = None
+        self._mon_pv = None
         self._sim_c = sim_center
         self._sim_s = sim_sigma
         self._sim_a = sim_amp
@@ -757,6 +759,9 @@ class _Interface:
                     raise ConnectionError(f"Detector PV not connected: {det}")
             else:
                 self._det = det
+
+            if monitor_pv and isinstance(monitor_pv, str) and monitor_pv.strip():
+                self._mon_pv = epics.PV(monitor_pv.strip(), auto_monitor=False)
 
     def move(self, pos: float, timeout: float = 60.0) -> bool:
         if self._sim:
@@ -796,7 +801,12 @@ class _Interface:
         val = self._det.get(use_monitor=False)
         if val is None:
             raise RuntimeError("Detector PV returned None.")
-        return float(val)
+        raw = float(val)
+        if self._mon_pv is not None:
+            mon = self._mon_pv.get(use_monitor=False)
+            if mon is not None and float(mon) != 0.0:
+                return raw / float(mon)
+        return raw
 
 
 # =============================================================================
@@ -835,6 +845,7 @@ def smart_scan(
     sim_amplitude       : float = 100.0,
     sim_offset          : float = 10.0,
     sim_noise           : float = 2.0,
+    monitor_pv          : str   = "",
     verbose             : bool  = True,
     debug               : bool  = False,
 ) -> ScanResult:
@@ -861,6 +872,7 @@ def smart_scan(
         simulate=simulate,
         sim_center=sim_center, sim_sigma=sim_sigma,
         sim_amp=sim_amplitude, sim_offset=sim_offset, sim_noise=sim_noise,
+        monitor_pv=monitor_pv,
     )
 
     current_pos = iface.position()
@@ -917,6 +929,8 @@ def smart_scan(
     if verbose:
         tag = " [SIM]" if (simulate or not _EPICS_AVAILABLE) else ""
         print(f"=== Smart Scan{tag}  motor={motor_label}  det={det_label}  mode={mode} ===")
+        if monitor_pv and not (simulate or not _EPICS_AVAILABLE):
+            print(f"    Monitor PV   : {monitor_pv}  (normalizing det/monitor)")
         print(f"    Initial sweep: {start} → {stop}  ({nsteps} steps)")
 
     if not iface._sim:
@@ -1581,7 +1595,7 @@ import threading
 class _FlyInterface:
     def __init__(self, motor, det, simulate: bool,
                  sim_center, sim_sigma, sim_amp, sim_offset, sim_noise,
-                 sim_velocity):
+                 sim_velocity, monitor_pv: str = ""):
         self._sim      = simulate or not _EPICS_AVAILABLE
         self._sim_pos  = 0.0
         self._sim_vel  = sim_velocity
@@ -1589,6 +1603,7 @@ class _FlyInterface:
         self._sim_dest = 0.0
         self._pvaxis   = None
         self._motor    = None
+        self._mon_pv   = None
         self._sim_c    = sim_center
         self._sim_s    = sim_sigma
         self._sim_a    = sim_amp
@@ -1621,6 +1636,9 @@ class _FlyInterface:
                     raise ConnectionError(f"Detector PV not connected: {det}")
             else:
                 self._det = det
+
+            if monitor_pv and isinstance(monitor_pv, str) and monitor_pv.strip():
+                self._mon_pv = epics.PV(monitor_pv.strip(), auto_monitor=False)
 
     def soft_limits(self) -> tuple:
         if self._sim:
@@ -1717,7 +1735,12 @@ class _FlyInterface:
                     * np.exp(-0.5 * ((p - self._sim_c) / self._sim_s) ** 2)
                     + self._sim_o
                     + np.random.normal(0, self._sim_n))
-        return float(self._det.get())
+        raw = float(self._det.get())
+        if self._mon_pv is not None:
+            mon = self._mon_pv.get(use_monitor=False)
+            if mon is not None and float(mon) != 0.0:
+                return raw / float(mon)
+        return raw
 
 
 def _sample_loop(iface: _FlyInterface, sample_interval: float,
@@ -1767,6 +1790,7 @@ def fly_scan(
     sim_offset          : float = 10.0,
     sim_noise           : float = 2.0,
     sim_velocity        : float = 2.0,
+    monitor_pv          : str   = "",
     verbose             : bool  = True,
     debug               : bool  = False,
 ) -> ScanResult:
@@ -1790,6 +1814,7 @@ def fly_scan(
         sim_center=sim_center, sim_sigma=sim_sigma,
         sim_amp=sim_amplitude, sim_offset=sim_offset, sim_noise=sim_noise,
         sim_velocity=sim_velocity,
+        monitor_pv=monitor_pv,
     )
 
     current_pos = iface.read_position()
@@ -2516,6 +2541,7 @@ def align_beamline(
     fine_nsteps         : int   = 21,
     fine_scan_iter      : int   = 2,
     backlash_correction : bool  = False,
+    monitor_pv          : str   = "",
     plot                : bool  = False,
     simulate            : bool  = False,
     verbose             : bool  = True,
@@ -2781,6 +2807,7 @@ def align_beamline(
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
                     plot=plot,
                     backlash_correction=backlash_correction,
+                    monitor_pv=monitor_pv,
                     simulate=False, debug=not verbose,
                 )
                 if verbose:
@@ -2808,6 +2835,7 @@ def align_beamline(
                         extend_scan=pitch_extend_scan,
                         max_extend_steps=pitch_max_extend,
                         move_to_peak=False,
+                        monitor_pv=monitor_pv,
                         simulate=False, debug=not verbose,
                     )
                     if pitch_peak_method == "stats" and r_pitch.stats is not None:
@@ -2854,6 +2882,7 @@ def align_beamline(
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
                     plot=plot,
                     backlash_correction=backlash_correction,
+                    monitor_pv=monitor_pv,
                     simulate=False, debug=not verbose,
                 )
                 if verbose:
@@ -2881,6 +2910,7 @@ def align_beamline(
                         extend_scan=pitch_extend_scan,
                         max_extend_steps=pitch_max_extend,
                         move_to_peak=False,
+                        monitor_pv=monitor_pv,
                         simulate=False, debug=not verbose,
                     )
                     if r_pitch2.status == ScanStatus.SUCCESS:
@@ -2929,6 +2959,7 @@ def align_beamline(
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
                     plot=plot,
                     backlash_correction=backlash_correction,
+                    monitor_pv=monitor_pv,
                     simulate=False, debug=not verbose,
                 )
                 if verbose:
