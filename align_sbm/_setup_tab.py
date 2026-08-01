@@ -10,7 +10,11 @@ from PyQt6.QtWidgets import (
 
 
 class _NoScrollSpinBox(QSpinBox):
-    """QSpinBox that ignores mouse-wheel events to prevent accidental value changes."""
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class _NoScrollComboBox(QComboBox):
     def wheelEvent(self, event):
         event.ignore()
 
@@ -89,6 +93,7 @@ _SCAN_DEFAULTS = {
 def _dbl(val, lo=-1e6, hi=1e6, decimals=6, step=0.001):
     w = QLineEdit(str(val))
     w.setValidator(QDoubleValidator(lo, hi, decimals))
+    w.setMaximumWidth(130)
     return w
 
 
@@ -96,6 +101,7 @@ def _int(val, lo=1, hi=999):
     w = _NoScrollSpinBox()
     w.setRange(lo, hi)
     w.setValue(val)
+    w.setMaximumWidth(80)
     return w
 
 
@@ -261,9 +267,12 @@ class SetupTab(QWidget):
         vbox = QVBoxLayout(container)
         vbox.setSpacing(8)
 
+        _stay = QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint
+
         # Slits
         slit_grp = QGroupBox("Slit Positions (mm)")
         sf = QFormLayout(slit_grp)
+        sf.setFieldGrowthPolicy(_stay)
         for key, label in [
             ("slit_open_v",  "Open vertical"),
             ("slit_open_h",  "Open horizontal"),
@@ -278,6 +287,7 @@ class SetupTab(QWidget):
         # BRG2
         brg2_grp = QGroupBox("BRG2 Scan")
         bf = QFormLayout(brg2_grp)
+        bf.setFieldGrowthPolicy(_stay)
         for key, label, lo, hi, dec, step in [
             ("brg2_start",         "Start",           -1.0, 1.0, 5, 0.001),
             ("brg2_stop",          "Stop",            -1.0, 1.0, 5, 0.001),
@@ -300,6 +310,7 @@ class SetupTab(QWidget):
         # Pitch
         pitch_grp = QGroupBox("Pitch Piezo Scan")
         pf = QFormLayout(pitch_grp)
+        pf.setFieldGrowthPolicy(_stay)
         do_pitch = QCheckBox("Enable pitch scan")
         do_pitch.setChecked(_SCAN_DEFAULTS["do_pitch_scan"])
         self._scan_widgets["do_pitch_scan"] = do_pitch
@@ -327,6 +338,7 @@ class SetupTab(QWidget):
         # Roll2
         roll2_grp = QGroupBox("Roll2 Scan")
         rf = QFormLayout(roll2_grp)
+        rf.setFieldGrowthPolicy(_stay)
         for key, label, lo, hi, dec, step in [
             ("roll2_start",  "Start",  -1.0, 1.0, 5, 0.001),
             ("roll2_stop",   "Stop",   -1.0, 1.0, 5, 0.001),
@@ -348,6 +360,7 @@ class SetupTab(QWidget):
         # X2
         x2_grp = QGroupBox("X2 Scan")
         xf = QFormLayout(x2_grp)
+        xf.setFieldGrowthPolicy(_stay)
         for key, label, lo, hi, dec, step in [
             ("x2_start",  "Start",  -10.0, 10.0, 3, 0.1),
             ("x2_stop",   "Stop",   -10.0, 10.0, 3, 0.1),
@@ -369,6 +382,7 @@ class SetupTab(QWidget):
         # Fine scan
         fine_grp = QGroupBox("Fine Scan")
         ff = QFormLayout(fine_grp)
+        ff.setFieldGrowthPolicy(_stay)
         fine_en = QCheckBox("Enable fine scan")
         fine_en.setChecked(_SCAN_DEFAULTS["fine_scan"])
         self._scan_widgets["fine_scan"] = fine_en
@@ -389,6 +403,7 @@ class SetupTab(QWidget):
         # Other
         other_grp = QGroupBox("Other Parameters")
         of = QFormLayout(other_grp)
+        of.setFieldGrowthPolicy(_stay)
 
         backlash_w = QCheckBox("Enable backlash correction")
         backlash_w.setToolTip(
@@ -407,19 +422,19 @@ class SetupTab(QWidget):
         self._scan_widgets["energy_settle"] = e_settle_w
         of.addRow("Energy settle (s):", e_settle_w)
 
-        peak_cb = QComboBox()
+        peak_cb = _NoScrollComboBox()
         peak_cb.addItems(["stats", "fit"])
         peak_cb.setCurrentText(_SCAN_DEFAULTS["peak_method"])
         self._scan_widgets["peak_method"] = peak_cb
         of.addRow("Peak method:", peak_cb)
 
-        centre_cb = QComboBox()
+        centre_cb = _NoScrollComboBox()
         centre_cb.addItems(["centroid", "peak", "weighted_median"])
         centre_cb.setCurrentText(_SCAN_DEFAULTS["stats_centre"])
         self._scan_widgets["stats_centre"] = centre_cb
         of.addRow("Stats centre:", centre_cb)
 
-        profile_cb = QComboBox()
+        profile_cb = _NoScrollComboBox()
         profile_cb.addItems(["auto", "gaussian", "lorentzian", "super_gaussian"])
         profile_cb.setCurrentText(_SCAN_DEFAULTS["fit_profile"])
         self._scan_widgets["fit_profile"] = profile_cb

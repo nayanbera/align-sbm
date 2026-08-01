@@ -9,6 +9,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+
+class _NoScrollComboBox(QComboBox):
+    def wheelEvent(self, event):
+        event.ignore()
+
 _OPS = [">", "<", ">=", "<=", "==", "!="]
 
 
@@ -48,7 +53,7 @@ class HoldConditionsWidget(QGroupBox):
         # Logic selector
         logic_row = QHBoxLayout()
         logic_row.addWidget(QLabel("Suspend when:"))
-        self._logic_cb = QComboBox()
+        self._logic_cb = _NoScrollComboBox()
         self._logic_cb.addItems(["any condition is met", "all conditions are met"])
         self._logic_cb.setToolTip(
             "'any' — hold when at least one condition evaluates to True (default)\n"
@@ -103,7 +108,7 @@ class HoldConditionsWidget(QGroupBox):
         pv_item.setToolTip("EPICS PV name")
         self._table.setItem(r, 0, pv_item)
 
-        op_cb = QComboBox()
+        op_cb = _NoScrollComboBox()
         op_cb.addItems(_OPS)
         op_cb.setCurrentText(op)
         op_cb.currentIndexChanged.connect(lambda: self.config_changed.emit())
