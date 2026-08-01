@@ -290,6 +290,11 @@ class SetupTab(QWidget):
                 w = _dbl(_SCAN_DEFAULTS[key], lo=lo, hi=hi, decimals=dec, step=step)
             self._scan_widgets[key] = w
             bf.addRow(label + ":", w)
+        mon_brg2 = QCheckBox("Normalize with monitor PV")
+        mon_brg2.setChecked(_SCAN_DEFAULTS["monitor_brg2"])
+        mon_brg2.setToolTip("Divide detector by Monitor PV at each point (set Monitor PV in Motors & PVs tab)")
+        self._scan_widgets["monitor_brg2"] = mon_brg2
+        bf.addRow("", mon_brg2)
         vbox.addWidget(brg2_grp)
 
         # Pitch
@@ -312,6 +317,11 @@ class SetupTab(QWidget):
                 w = _dbl(_SCAN_DEFAULTS[key], lo=lo, hi=hi, decimals=dec, step=step)
             self._scan_widgets[key] = w
             pf.addRow(label + ":", w)
+        mon_pitch = QCheckBox("Normalize with monitor PV")
+        mon_pitch.setChecked(_SCAN_DEFAULTS["monitor_pitch"])
+        mon_pitch.setToolTip("Divide detector by Monitor PV at each point (set Monitor PV in Motors & PVs tab)")
+        self._scan_widgets["monitor_pitch"] = mon_pitch
+        pf.addRow("", mon_pitch)
         vbox.addWidget(pitch_grp)
 
         # Roll2
@@ -328,6 +338,11 @@ class SetupTab(QWidget):
                 w = _dbl(_SCAN_DEFAULTS[key], lo=lo, hi=hi, decimals=dec, step=step)
             self._scan_widgets[key] = w
             rf.addRow(label + ":", w)
+        mon_roll2 = QCheckBox("Normalize with monitor PV")
+        mon_roll2.setChecked(_SCAN_DEFAULTS["monitor_roll2"])
+        mon_roll2.setToolTip("Divide detector by Monitor PV at each point (set Monitor PV in Motors & PVs tab)")
+        self._scan_widgets["monitor_roll2"] = mon_roll2
+        rf.addRow("", mon_roll2)
         vbox.addWidget(roll2_grp)
 
         # X2
@@ -344,6 +359,11 @@ class SetupTab(QWidget):
                 w = _dbl(_SCAN_DEFAULTS[key], lo=lo, hi=hi, decimals=dec, step=step)
             self._scan_widgets[key] = w
             xf.addRow(label + ":", w)
+        mon_x2 = QCheckBox("Normalize with monitor PV")
+        mon_x2.setChecked(_SCAN_DEFAULTS["monitor_x2"])
+        mon_x2.setToolTip("Divide detector by Monitor PV at each point (set Monitor PV in Motors & PVs tab)")
+        self._scan_widgets["monitor_x2"] = mon_x2
+        xf.addRow("", mon_x2)
         vbox.addWidget(x2_grp)
 
         # Fine scan
@@ -423,28 +443,6 @@ class SetupTab(QWidget):
         of.addRow("Record settle (s):", r_settle_w)
 
         vbox.addWidget(other_grp)
-
-        # Monitor normalization per scan
-        norm_grp = QGroupBox("Monitor Normalization")
-        norm_grp.setToolTip(
-            "Select which scans use the Monitor PV (set in Motors & PVs) "
-            "to normalise the detector signal. Has no effect if Monitor PV is empty."
-        )
-        nf = QFormLayout(norm_grp)
-        norm_note = QLabel("Apply det/monitor normalization to:")
-        norm_note.setStyleSheet("color: #888; font-size: 10px;")
-        nf.addRow(norm_note)
-        for key, label in [
-            ("monitor_brg2",  "BRG2 scan"),
-            ("monitor_pitch", "Pitch scan"),
-            ("monitor_roll2", "Roll2 scan"),
-            ("monitor_x2",    "X2 scan"),
-        ]:
-            cb = QCheckBox(label)
-            cb.setChecked(_SCAN_DEFAULTS[key])
-            self._scan_widgets[key] = cb
-            nf.addRow("", cb)
-        vbox.addWidget(norm_grp)
 
         # Post-Alignment Recording
         rec_grp = QGroupBox("Post-Alignment Recording")
