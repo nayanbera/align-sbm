@@ -728,6 +728,7 @@ class AlignTab(QWidget):
         self._start_btn.setEnabled(False)
         self._abort_btn.setEnabled(True)
         self._move_btn.setEnabled(False)
+        self._per_e_edit.setEnabled(False)
         self._progress.setRange(0, 0)
         self._progress.setVisible(True)
         iter_str = ""
@@ -757,6 +758,7 @@ class AlignTab(QWidget):
         self._start_btn.setEnabled(True)
         self._abort_btn.setEnabled(False)
         self._move_btn.setEnabled(True)
+        self._per_e_edit.setEnabled(True)
         self._progress.setVisible(False)
 
     def _move_to_energy(self):
@@ -1051,6 +1053,7 @@ class AlignTab(QWidget):
 
         keep_looping = (
             self._loop_active
+            and self._loop_cb.isChecked()
             and not self._loop_abort
             and (self._loop_max == 0 or self._loop_count < self._loop_max)
         )
@@ -1087,7 +1090,7 @@ class AlignTab(QWidget):
             self._reset_buttons()
 
     def _next_loop_iteration(self):
-        if self._loop_abort:
+        if self._loop_abort or not self._loop_cb.isChecked():
             self._loop_active = False
             self._reset_buttons()
             return
