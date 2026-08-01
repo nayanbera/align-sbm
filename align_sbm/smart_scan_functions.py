@@ -2542,6 +2542,10 @@ def align_beamline(
     fine_scan_iter      : int   = 2,
     backlash_correction : bool  = False,
     monitor_pv          : str   = "",
+    monitor_brg2        : bool  = True,
+    monitor_pitch       : bool  = True,
+    monitor_roll2       : bool  = True,
+    monitor_x2          : bool  = True,
     plot                : bool  = False,
     simulate            : bool  = False,
     verbose             : bool  = True,
@@ -2807,7 +2811,7 @@ def align_beamline(
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
                     plot=plot,
                     backlash_correction=backlash_correction,
-                    monitor_pv=monitor_pv,
+                    monitor_pv=monitor_pv if monitor_brg2 else "",
                     simulate=False, debug=not verbose,
                 )
                 if verbose:
@@ -2835,7 +2839,7 @@ def align_beamline(
                         extend_scan=pitch_extend_scan,
                         max_extend_steps=pitch_max_extend,
                         move_to_peak=False,
-                        monitor_pv=monitor_pv,
+                        monitor_pv=monitor_pv if monitor_pitch else "",
                         simulate=False, debug=not verbose,
                     )
                     if pitch_peak_method == "stats" and r_pitch.stats is not None:
@@ -2882,7 +2886,7 @@ def align_beamline(
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
                     plot=plot,
                     backlash_correction=backlash_correction,
-                    monitor_pv=monitor_pv,
+                    monitor_pv=monitor_pv if monitor_roll2 else "",
                     simulate=False, debug=not verbose,
                 )
                 if verbose:
@@ -2910,7 +2914,7 @@ def align_beamline(
                         extend_scan=pitch_extend_scan,
                         max_extend_steps=pitch_max_extend,
                         move_to_peak=False,
-                        monitor_pv=monitor_pv,
+                        monitor_pv=monitor_pv if monitor_pitch else "",
                         simulate=False, debug=not verbose,
                     )
                     if r_pitch2.status == ScanStatus.SUCCESS:
@@ -2959,7 +2963,7 @@ def align_beamline(
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
                     plot=plot,
                     backlash_correction=backlash_correction,
-                    monitor_pv=monitor_pv,
+                    monitor_pv=monitor_pv if monitor_x2 else "",
                     simulate=False, debug=not verbose,
                 )
                 if verbose:

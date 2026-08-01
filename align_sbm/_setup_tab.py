@@ -39,6 +39,11 @@ _PV_DEFAULTS = {
 }
 
 _SCAN_DEFAULTS = {
+    # Monitor normalization per scan
+    "monitor_brg2":   True,
+    "monitor_pitch":  True,
+    "monitor_roll2":  True,
+    "monitor_x2":     True,
     # Slits
     "slit_open_v":    0.5,
     "slit_open_h":    0.5,
@@ -418,6 +423,28 @@ class SetupTab(QWidget):
         of.addRow("Record settle (s):", r_settle_w)
 
         vbox.addWidget(other_grp)
+
+        # Monitor normalization per scan
+        norm_grp = QGroupBox("Monitor Normalization")
+        norm_grp.setToolTip(
+            "Select which scans use the Monitor PV (set in Motors & PVs) "
+            "to normalise the detector signal. Has no effect if Monitor PV is empty."
+        )
+        nf = QFormLayout(norm_grp)
+        norm_note = QLabel("Apply det/monitor normalization to:")
+        norm_note.setStyleSheet("color: #888; font-size: 10px;")
+        nf.addRow(norm_note)
+        for key, label in [
+            ("monitor_brg2",  "BRG2 scan"),
+            ("monitor_pitch", "Pitch scan"),
+            ("monitor_roll2", "Roll2 scan"),
+            ("monitor_x2",    "X2 scan"),
+        ]:
+            cb = QCheckBox(label)
+            cb.setChecked(_SCAN_DEFAULTS[key])
+            self._scan_widgets[key] = cb
+            nf.addRow("", cb)
+        vbox.addWidget(norm_grp)
 
         # Post-Alignment Recording
         rec_grp = QGroupBox("Post-Alignment Recording")
