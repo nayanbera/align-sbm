@@ -15,6 +15,7 @@ class AlignWorker(QThread):
     scan_finished       = pyqtSignal(object)         # SimpleNamespace result summary
     step_update         = pyqtSignal(str, int, int)  # (label, current, total)
     row_done            = pyqtSignal(dict)           # record after each row
+    row_started         = pyqtSignal(int)            # index into expanded table
     done                = pyqtSignal(list)           # all records at end
     error               = pyqtSignal(str)            # traceback string
     hold_triggered      = pyqtSignal(str)            # hold is active (msg)
@@ -154,6 +155,8 @@ class AlignWorker(QThread):
             # Snapshot current kwargs so any mid-run update_kwargs() call from
             # the main thread takes effect at the next row boundary.
             kwargs_this_row = dict(self._kwargs)
+
+            self.row_started.emit(row_idx)
 
             # ── Spawn subprocess for this row ─────────────────────────────────
             q    = ctx.Queue()

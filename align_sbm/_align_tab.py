@@ -153,13 +153,14 @@ class AlignTab(QWidget):
         self._csv_path: str = ""
 
         # Loop state
-        self._loop_active   = False
-        self._loop_abort    = False
-        self._loop_count    = 0
-        self._loop_max      = 1
-        self._loop_rows     = []
-        self._loop_kwargs   = {}
-        self._loop_simulate = False
+        self._loop_active          = False
+        self._loop_abort           = False
+        self._loop_count           = 0
+        self._loop_max             = 1
+        self._loop_rows            = []
+        self._loop_kwargs          = {}
+        self._loop_simulate        = False
+        self._running_list_items   = []   # selected QListWidgetItems for current run
 
         self._build_ui()
         self._restore_last_csv()
@@ -684,6 +685,13 @@ class AlignTab(QWidget):
         except ValueError:
             self._loop_max = 0
 
+        # Snapshot selected list items for row highlighting during the run
+        self._running_list_items = [
+            self._row_list.item(i)
+            for i in range(self._row_list.count())
+            if self._row_list.item(i).isSelected()
+        ]
+
         # Clear results table and switch to Log tab for the new run
         self._results_table.setRowCount(0)
         self._bottom_tabs.setCurrentWidget(self._log_tab)
@@ -720,6 +728,7 @@ class AlignTab(QWidget):
         self._worker.scan_finished.connect(self._on_scan_finished)
         self._worker.step_update.connect(self._on_step_update)
         self._worker.row_done.connect(self._on_row_done)
+        self._worker.row_started.connect(self._on_row_started)
         self._worker.done.connect(self._on_done)
         self._worker.error.connect(self._on_error)
         self._worker.hold_triggered.connect(self._on_hold_triggered)
@@ -760,6 +769,13 @@ class AlignTab(QWidget):
         self._move_btn.setEnabled(True)
         self._per_e_edit.setEnabled(True)
         self._progress.setVisible(False)
+        from PyQt6.QtGui import QBrush
+        for item in self._running_list_items:
+            f = item.font()
+            f.setBold(False)
+            item.setFont(f)
+            item.setForeground(QBrush())
+        self._running_list_items = []
 
     def _move_to_energy(self):
         """Move all motors to the first selected energy row without running alignment scans."""
@@ -800,6 +816,18 @@ class AlignTab(QWidget):
         self._progress.setValue(current)
         self._status_lbl.setText(f"[{current}/{total}] {label}")
         self.status_message.emit(f"{label}…")
+
+    def _on_row_started(self, row_idx: int):
+        per_e    = max(1, getattr(self, '_per_e_repeat', 1))
+        list_idx = row_idx // per_e
+        from PyQt6.QtGui import QBrush, QColor
+        active_color = QColor("#ffa726")   # amber — visible over selection blue
+        for i, item in enumerate(self._running_list_items):
+            bold = (i == list_idx)
+            f = item.font()
+            f.setBold(bold)
+            item.setFont(f)
+            item.setForeground(QBrush(active_color) if bold else QBrush())
 
     def _on_row_done(self, record: dict):
         r = self._results_table.rowCount()
