@@ -71,6 +71,7 @@ Two inner tabs:
 | PV Prefix | Prefix applied to all PVs when you click *Auto-fill all PVs* |
 | BRG2 / Roll2 / X2 motor | EPICS motor record base PV (e.g. `ID15A2:BRG2`) |
 | Detector | Scalar readback PV |
+| Monitor (normalize) | Optional monitor detector PV — when set, all scan signals are divided by this value before fitting, statistics, and plotting (signal normalization). Leave blank to disable. |
 | Pitch piezo SP | Setpoint PV for the pitch piezo (`PVAxis`) |
 | Slit V / H SP | Vertical and horizontal slit setpoint PVs |
 | Mono energy | Monochromator energy setpoint PV |
@@ -81,7 +82,11 @@ Each PV field shows a live readback value next to it (updated via CA monitor). A
 
 **Scan Parameters**
 
-Editable scan ranges, step counts, slit open/close values, fine-scan settings, settle times, peak-finding method, and output CSV filename. Defaults:
+Editable scan ranges, step counts, slit open/close values, fine-scan settings, settle times, peak-finding method, and output CSV filename. All numeric fields and dropdowns use compact, fixed-width widgets that do not expand horizontally when the window is resized. Mouse-wheel scrolling is disabled on all spinboxes and dropdowns to prevent accidental value changes.
+
+Each scan group (BRG2, Pitch, Roll2, X2) includes a **Normalize with monitor PV** checkbox. When checked, the detector signal for that scan is divided by the Monitor PV value at each point — enabling per-scan normalization control independent of the other scans. The Monitor PV is set in the Motors & PVs tab.
+
+Defaults:
 
 | Motor | Start | Stop | Steps |
 |---|---|---|---|
@@ -147,13 +152,15 @@ Multi-select list populated from the Energy Table tab. Use **All** / **None** / 
 
 **Run**
 
-- **Start Alignment** — builds the EPICS/simulation context from the Setup tab and runs `align_beamline()` in a background thread for every selected energy row.
+- **Start Alignment** — builds the EPICS/simulation context from the Setup tab and runs `align_beamline()` in a background thread for every selected energy row. The per-energy repeat count (see below) is frozen for the duration of the run to prevent mid-run changes.
 - **Abort** — stops the running scan immediately (the background thread is terminated). If looping, no further iterations are started.
 - **Demo Scan (sim)** — runs a single simulated BRG2 `smart_scan` and animates its data points live in the BRG2 plot tab. Useful for verifying the GUI without a beamline.
-- **Loop** checkbox + **Iterations** field — when *Loop* is checked, the full alignment sequence repeats automatically after each pass.
-  - `0` (default) — runs indefinitely until **Abort** is pressed.
+- **Loop** checkbox + **Iterations** field — when *Loop* is checked, the full alignment sequence repeats automatically after each pass. Unchecking the box mid-run stops looping after the current pass completes (checked live at each loop boundary).
+  - `0` (default) — runs indefinitely until **Abort** is pressed or the checkbox is unchecked.
   - `N > 0` — runs exactly N times then stops.
   - The log marks each iteration with `Loop N/total` headers. The results table accumulates across all loops.
+  - The **per-energy repeat** spinbox (number of times each energy row is run within a single pass) is disabled while alignment is running and re-enabled when it finishes or is aborted.
+- **Currently running row** — the energy row that is actively being aligned is highlighted in amber with bold text in the energy list. Highlighting is cleared when the run finishes or is aborted.
 
 #### Right panel — output
 
@@ -266,12 +273,13 @@ The backend is self-contained in `align_sbm/smart_scan_functions.py` and has no 
 ```python
 from align_sbm import smart_scan, fly_scan, align_beamline, BeamlineConfig, table400
 
-# Simulate a single scan
+# Simulate a single scan (with optional monitor normalization)
 result = smart_scan(
     motor="IOC:m1", det="IOC:det",
     start=-1.0, stop=1.0, nsteps=21,
     simulate=True, sim_center=0.1, sim_sigma=0.3,
     sim_amplitude=1000, sim_noise=10,
+    monitor_pv="IOC:monitor",   # optional — divides det by monitor at each point
 )
 print(result.center, result.sigma)
 
@@ -293,6 +301,12 @@ results = align_beamline(
     roll2_energy_pv="ID15A2:Roll2:EnergySet",
     x2_energy_pv="ID15A2:X2:EnergySet",
     filename="alignment_results.csv",
+    # optional monitor normalization (per-scan on/off flags default to True)
+    monitor_pv="ID15A2:monitor",
+    monitor_brg2=True,
+    monitor_pitch=True,
+    monitor_roll2=True,
+    monitor_x2=True,
 )
 ```
 
@@ -308,6 +322,8 @@ results = align_beamline(
 | `ScanResult` | Dataclass: status, positions, signals, center, sigma, amplitude, profile, stats |
 | `ScanStatus` | Enum: SUCCESS, NO_PEAK, OUT_OF_RANGE, FIT_FAILED, INSUFFICIENT_DATA |
 | `stats_peak(positions, signals)` | Model-free peak estimators: centroid, RMS width, FWHM, weighted median |
+
+**Monitor normalization** — both `smart_scan` and `fly_scan` accept a `monitor_pv` keyword. When set (non-empty string), the detector value at each point is divided by the monitor PV readback before any fitting or statistics are computed. This normalization is applied inside `_Interface.read()` / `_FlyInterface.read_detector()`, so all downstream code (peak-finding, Gaussian fit, plot data, CSV output) automatically operates on normalized signals. `align_beamline` additionally accepts `monitor_brg2`, `monitor_pitch`, `monitor_roll2`, and `monitor_x2` boolean flags to enable or disable normalization independently for each scan step.
 
 ### Simulation mode
 
