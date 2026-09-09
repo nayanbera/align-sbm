@@ -234,18 +234,22 @@ class SetupTab(QWidget):
         info_epv = QLabel(
             "PVs written around the monochromator move — e.g. open/close shutters, "
             "set attenuators, or trigger beamline interlocks.\n"
-            "<b>PV Name</b>: EPICS process variable.  "
-            "<b>Value</b>: numeric or string value to write.  "
-            "<b>When</b>: Pre = before mono moves; Post = after settle."
+            "<b>PV Name</b>: EPICS PV to write.  "
+            "<b>Value</b>: value to write.  "
+            "<b>When</b>: Pre = before mono moves; Post = after settle.  "
+            "<b>Wait PV</b> (optional): poll this PV after writing.  "
+            "<b>Wait Value</b>: target value to wait for (timeout 30 s)."
         )
         info_epv.setWordWrap(True)
         epv.addWidget(info_epv)
 
-        self._energy_pv_table = QTableWidget(0, 3)
-        self._energy_pv_table.setHorizontalHeaderLabels(["PV Name", "Value", "When"])
+        self._energy_pv_table = QTableWidget(0, 5)
+        self._energy_pv_table.setHorizontalHeaderLabels(["PV Name", "Value", "When", "Wait PV", "Wait Value"])
         self._energy_pv_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._energy_pv_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._energy_pv_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._energy_pv_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._energy_pv_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self._energy_pv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._energy_pv_table.setMaximumHeight(160)
         epv.addWidget(self._energy_pv_table)
@@ -557,7 +561,7 @@ class SetupTab(QWidget):
             if r >= 0:
                 self._record_table.removeRow(r)
 
-    def _add_energy_pv_row(self, when="Pre", pv="", value=""):
+    def _add_energy_pv_row(self, when="Pre", pv="", value="", wait_pv="", wait_value=""):
         r = self._energy_pv_table.rowCount()
         self._energy_pv_table.insertRow(r)
         self._energy_pv_table.setItem(r, 0, QTableWidgetItem(pv))
@@ -566,6 +570,8 @@ class SetupTab(QWidget):
         when_cb.addItems(["Pre", "Post"])
         when_cb.setCurrentText(when)
         self._energy_pv_table.setCellWidget(r, 2, when_cb)
+        self._energy_pv_table.setItem(r, 3, QTableWidgetItem(str(wait_pv)))
+        self._energy_pv_table.setItem(r, 4, QTableWidgetItem(str(wait_value)))
 
     def _remove_energy_pv_row(self):
         rows = sorted(
@@ -683,19 +689,30 @@ class SetupTab(QWidget):
             pv_item  = self._energy_pv_table.item(r, 0)
             val_item = self._energy_pv_table.item(r, 1)
             cb       = self._energy_pv_table.cellWidget(r, 2)
-            pv    = pv_item.text().strip()  if pv_item  else ""
-            raw_v = val_item.text().strip() if val_item else ""
-            when  = cb.currentText() if cb else "Pre"
+            wpv_item = self._energy_pv_table.item(r, 3)
+            wval_item= self._energy_pv_table.item(r, 4)
+            pv       = pv_item.text().strip()   if pv_item   else ""
+            raw_v    = val_item.text().strip()  if val_item  else ""
+            when     = cb.currentText() if cb else "Pre"
+            wait_pv  = wpv_item.text().strip()  if wpv_item  else ""
+            raw_wv   = wval_item.text().strip() if wval_item else ""
             if not pv:
                 continue
             try:
                 value = float(raw_v)
             except ValueError:
                 value = raw_v
+            entry = (pv, value)
+            if wait_pv:
+                try:
+                    wait_value = float(raw_wv)
+                except ValueError:
+                    wait_value = raw_wv
+                entry = (pv, value, wait_pv, wait_value)
             if when == "Pre":
-                pre_energy_pvs.append((pv, value))
+                pre_energy_pvs.append(entry)
             else:
-                post_energy_pvs.append((pv, value))
+                post_energy_pvs.append(entry)
         kwargs["pre_energy_pvs"]  = pre_energy_pvs  or None
         kwargs["post_energy_pvs"] = post_energy_pvs or None
 
@@ -726,15 +743,17 @@ class SetupTab(QWidget):
                 rows.append((lbl, pv))
         self._settings.setValue("record_pvs", repr(rows))
 
-        # Save energy change PV table as list of (pv, value, when) tuples
+        # Save energy change PV table as list of (pv, value, when, wait_pv, wait_value) tuples
         epv_rows = []
         for r in range(self._energy_pv_table.rowCount()):
-            pv    = (self._energy_pv_table.item(r, 0) or QTableWidgetItem()).text().strip()
-            value = (self._energy_pv_table.item(r, 1) or QTableWidgetItem()).text().strip()
-            cb    = self._energy_pv_table.cellWidget(r, 2)
-            when  = cb.currentText() if cb else "Pre"
+            pv       = (self._energy_pv_table.item(r, 0) or QTableWidgetItem()).text().strip()
+            value    = (self._energy_pv_table.item(r, 1) or QTableWidgetItem()).text().strip()
+            cb       = self._energy_pv_table.cellWidget(r, 2)
+            when     = cb.currentText() if cb else "Pre"
+            wait_pv  = (self._energy_pv_table.item(r, 3) or QTableWidgetItem()).text().strip()
+            wait_val = (self._energy_pv_table.item(r, 4) or QTableWidgetItem()).text().strip()
             if pv:
-                epv_rows.append((pv, value, when))
+                epv_rows.append((pv, value, when, wait_pv, wait_val))
         self._settings.setValue("energy_pvs", repr(epv_rows))
 
     def _load_settings(self):
@@ -777,7 +796,13 @@ class SetupTab(QWidget):
             try:
                 epv_rows = eval(raw_epv)  # noqa: S307
                 self._energy_pv_table.setRowCount(0)
-                for pv, value, when in epv_rows:
-                    self._add_energy_pv_row(when, pv, value)
+                for row in epv_rows:
+                    # support old 3-tuple (pv, value, when) and new 5-tuple
+                    if len(row) == 5:
+                        pv, value, when, wait_pv, wait_val = row
+                    else:
+                        pv, value, when = row[:3]
+                        wait_pv, wait_val = "", ""
+                    self._add_energy_pv_row(when, pv, value, wait_pv, wait_val)
             except Exception:
                 pass

@@ -2272,6 +2272,29 @@ def _pv_put(pv_or_name, value, label, wait, verbose):
         print(f"  {label:10s} → {pvlabel} = {value}")
 
 
+def _wait_for_pv(pvname, target, timeout=30, poll=0.25, verbose=True):
+    """Poll pvname until its value equals target, up to timeout seconds."""
+    pv = epics.PV(pvname)
+    if not pv.connect(timeout=5):
+        print(f"  [WARN] Wait PV not connected: {pvname} — skipping wait")
+        return
+    deadline = time.time() + timeout
+    if verbose:
+        print(f"  Waiting for {pvname} == {target} (timeout {timeout}s) …")
+    while time.time() < deadline:
+        val = pv.get()
+        try:
+            matched = float(val) == float(target)
+        except (TypeError, ValueError):
+            matched = str(val).strip() == str(target).strip()
+        if matched:
+            if verbose:
+                print(f"    → {pvname} reached {val}")
+            return
+        time.sleep(poll)
+    print(f"  [WARN] Timeout waiting for {pvname} == {target} (current={pv.get()}) — continuing")
+
+
 def set_energy(mono_e, table=None, tol=0.5,
                mono_e_pv="ID15A2:mono:Energy", harmonic_pv="ID15A2:und:Harmonic",
                und_e_pv="ID15A2:und:Energy", und_start_pv="ID15A2:und:Start",
@@ -2294,18 +2317,31 @@ def set_energy(mono_e, table=None, tol=0.5,
         print(f"  X2       : {row['x2']}")
     def _lbl(p): return _safe_label(p)
     def _apply_extra_pvs(pvlist, label):
-        """Write (pvname, value) pairs; print in sim mode."""
+        """Write (pvname, value[, wait_pv, wait_value]) tuples.
+
+        If wait_pv is given, polls it until it equals wait_value (timeout 30 s).
+        """
         if not pvlist:
             return
         if verbose:
             print(f"  {label}:")
         if simulate or not _EPICS_AVAILABLE:
-            for pvname, value in pvlist:
+            for entry in pvlist:
+                pvname, value = entry[0], entry[1]
+                wait_pv   = entry[2] if len(entry) > 2 else None
+                wait_value= entry[3] if len(entry) > 3 else None
                 if verbose:
                     print(f"    [SIM] caput {pvname} {value}")
+                    if wait_pv is not None:
+                        print(f"    [SIM] wait {wait_pv} == {wait_value}")
         else:
-            for pvname, value in pvlist:
+            for entry in pvlist:
+                pvname, value = entry[0], entry[1]
+                wait_pv   = entry[2] if len(entry) > 2 else None
+                wait_value= entry[3] if len(entry) > 3 else None
                 _pv_put(pvname, value, pvname, wait=False, verbose=verbose)
+                if wait_pv:
+                    _wait_for_pv(wait_pv, wait_value, timeout=30, verbose=verbose)
 
     _apply_extra_pvs(pre_energy_pvs, "Pre-energy PVs")
 
@@ -2429,12 +2465,22 @@ def set_energy_interpolated(mono_e, table=None, method="pchip", extrapolate=Fals
         if verbose:
             print(f"  {label}:")
         if simulate or not _EPICS_AVAILABLE:
-            for pvname, value in pvlist:
+            for entry in pvlist:
+                pvname, value = entry[0], entry[1]
+                wait_pv   = entry[2] if len(entry) > 2 else None
+                wait_value= entry[3] if len(entry) > 3 else None
                 if verbose:
                     print(f"    [SIM] caput {pvname} {value}")
+                    if wait_pv is not None:
+                        print(f"    [SIM] wait {wait_pv} == {wait_value}")
         else:
-            for pvname, value in pvlist:
+            for entry in pvlist:
+                pvname, value = entry[0], entry[1]
+                wait_pv   = entry[2] if len(entry) > 2 else None
+                wait_value= entry[3] if len(entry) > 3 else None
                 _pv_put(pvname, value, pvname, wait=False, verbose=verbose)
+                if wait_pv:
+                    _wait_for_pv(wait_pv, wait_value, timeout=30, verbose=verbose)
 
     _apply_extra_pvs(pre_energy_pvs, "Pre-energy PVs")
 
