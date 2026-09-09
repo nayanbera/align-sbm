@@ -2276,7 +2276,13 @@ def set_energy(mono_e, table=None, tol=0.5,
                mono_e_pv="ID15A2:mono:Energy", harmonic_pv="ID15A2:und:Harmonic",
                und_e_pv="ID15A2:und:Energy", und_start_pv="ID15A2:und:Start",
                roll2_pv="ID15A2:mono:Roll2", x2_pv="ID15A2:mono:X2",
-               wait=True, settle=1.0, simulate=False, verbose=True, debug=False) -> dict:
+               wait=True, settle=1.0, simulate=False, verbose=True, debug=False,
+               pre_energy_pvs=None, post_energy_pvs=None) -> dict:
+    """
+    pre_energy_pvs / post_energy_pvs: list of (pvname, value) pairs written
+    before / after the monochromator move (and settle).  Both default to None
+    (no extra writes).  In simulation mode the writes are printed but not sent.
+    """
     if debug:
         verbose = False
     row = get_energy_row(mono_e, table=table, tol=tol)
@@ -2287,6 +2293,22 @@ def set_energy(mono_e, table=None, tol=0.5,
         print(f"  Roll2    : {row['roll2']:.4g}")
         print(f"  X2       : {row['x2']}")
     def _lbl(p): return _safe_label(p)
+    def _apply_extra_pvs(pvlist, label):
+        """Write (pvname, value) pairs; print in sim mode."""
+        if not pvlist:
+            return
+        if verbose:
+            print(f"  {label}:")
+        if simulate or not _EPICS_AVAILABLE:
+            for pvname, value in pvlist:
+                if verbose:
+                    print(f"    [SIM] caput {pvname} {value}")
+        else:
+            for pvname, value in pvlist:
+                _pv_put(pvname, value, pvname, wait=False, verbose=verbose)
+
+    _apply_extra_pvs(pre_energy_pvs, "Pre-energy PVs")
+
     if simulate or not _EPICS_AVAILABLE:
         if verbose:
             print("  [SIMULATION – no PVs written]")
@@ -2323,6 +2345,9 @@ def set_energy(mono_e, table=None, tol=0.5,
             if verbose:
                 print(f"  Waiting {settle}s for beamline to settle …")
             time.sleep(settle)
+
+    _apply_extra_pvs(post_energy_pvs, "Post-energy PVs")
+
     if verbose:
         print("  Done.")
     return row
@@ -2390,12 +2415,29 @@ def set_energy_interpolated(mono_e, table=None, method="pchip", extrapolate=Fals
                             mono_e_pv="ID15A2:mono:Energy", harmonic_pv="ID15A2:und:Harmonic",
                             und_e_pv="ID15A2:und:Energy", und_start_pv="ID15A2:und:Start",
                             roll2_pv="ID15A2:mono:Roll2", x2_pv="ID15A2:mono:X2",
-                            wait=True, settle=1.0, simulate=False, verbose=True, debug=False) -> dict:
+                            wait=True, settle=1.0, simulate=False, verbose=True, debug=False,
+                            pre_energy_pvs=None, post_energy_pvs=None) -> dict:
     if debug:
         verbose = False
     row = interpolate_energy(mono_e, table=table, method=method,
                              extrapolate=extrapolate, verbose=verbose)
     def _lbl(p): return _safe_label(p)
+
+    def _apply_extra_pvs(pvlist, label):
+        if not pvlist:
+            return
+        if verbose:
+            print(f"  {label}:")
+        if simulate or not _EPICS_AVAILABLE:
+            for pvname, value in pvlist:
+                if verbose:
+                    print(f"    [SIM] caput {pvname} {value}")
+        else:
+            for pvname, value in pvlist:
+                _pv_put(pvname, value, pvname, wait=False, verbose=verbose)
+
+    _apply_extra_pvs(pre_energy_pvs, "Pre-energy PVs")
+
     if simulate or not _EPICS_AVAILABLE:
         if verbose:
             print(f"  [SIMULATION – no PVs written]")
@@ -2432,6 +2474,9 @@ def set_energy_interpolated(mono_e, table=None, method="pchip", extrapolate=Fals
             if verbose:
                 print(f"  Waiting {settle}s for beamline to settle …")
             time.sleep(settle)
+
+    _apply_extra_pvs(post_energy_pvs, "Post-energy PVs")
+
     if verbose:
         print("  Done.")
     return row
@@ -2471,19 +2516,22 @@ def plot_interpolation(table=None, method="pchip", n_plot=300) -> None:
 
 def _set_energy_for_row(mono_e, table, mono_e_pv, harmonic_pv, und_e_pv,
                          und_start_pv, roll2_energy_pv, x2_energy_pv, interp_method,
-                         energy_settle, simulate, verbose):
+                         energy_settle, simulate, verbose,
+                         pre_energy_pvs=None, post_energy_pvs=None):
     if interp_method is None:
         set_energy(mono_e, table=table, mono_e_pv=mono_e_pv, harmonic_pv=harmonic_pv,
                    und_e_pv=und_e_pv, und_start_pv=und_start_pv,
                    roll2_pv=roll2_energy_pv, x2_pv=x2_energy_pv,
-                   wait=True, settle=energy_settle, simulate=simulate, verbose=verbose, debug=False)
+                   wait=True, settle=energy_settle, simulate=simulate, verbose=verbose,
+                   debug=False, pre_energy_pvs=pre_energy_pvs, post_energy_pvs=post_energy_pvs)
     else:
         set_energy_interpolated(mono_e, table=table, method=interp_method,
                                 mono_e_pv=mono_e_pv, harmonic_pv=harmonic_pv,
                                 und_e_pv=und_e_pv, und_start_pv=und_start_pv,
                                 roll2_pv=roll2_energy_pv, x2_pv=x2_energy_pv,
                                 wait=True, settle=energy_settle, simulate=simulate,
-                                verbose=verbose, debug=False)
+                                verbose=verbose, debug=False,
+                                pre_energy_pvs=pre_energy_pvs, post_energy_pvs=post_energy_pvs)
 
 
 def align_beamline(
@@ -2552,6 +2600,8 @@ def align_beamline(
     debug               : bool  = False,
     step_cb                     = None,
     row_cb                      = None,
+    pre_energy_pvs      : list  = None,
+    post_energy_pvs     : list  = None,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -2629,6 +2679,8 @@ def align_beamline(
         record_pvs          = config.record_pvs
         record_settle       = config.record_settle
         filename            = config.filename
+        pre_energy_pvs      = config.pre_energy_pvs
+        post_energy_pvs     = config.post_energy_pvs
 
     import csv, os, datetime as _dt
 
@@ -2775,6 +2827,8 @@ def align_beamline(
                 interp_method=interp_method,
                 energy_settle=energy_settle,
                 simulate=simulate, verbose=verbose,
+                pre_energy_pvs=pre_energy_pvs,
+                post_energy_pvs=post_energy_pvs,
             )
 
             # ── a) Open slits ─────────────────────────────────────────────────
@@ -3197,6 +3251,8 @@ class BeamlineConfig:
     record_pvs          : dict    = None
     record_settle       : float   = 2.0
     filename            : str     = "alignment_results.csv"
+    pre_energy_pvs      : list    = None  # [(pvname, value), ...] written before mono move
+    post_energy_pvs     : list    = None  # [(pvname, value), ...] written after mono settle
 
     def check(self, verbose: bool = True) -> bool:
         errors   = []

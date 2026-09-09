@@ -222,6 +222,51 @@ class SetupTab(QWidget):
             pvf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
         vbox.addWidget(pv_grp)
 
+        # ── Pre / Post energy change PVs ────────────────────────────────────
+        energy_pvs_grp = QGroupBox("Energy Change PVs")
+        energy_pvs_grp.setToolTip(
+            "Optional PVs to write before and after the monochromator energy change.\n"
+            "Rows marked 'Pre' are written before the mono moves; "
+            "'Post' rows are written after the settle time."
+        )
+        epv = QVBoxLayout(energy_pvs_grp)
+
+        info_epv = QLabel(
+            "PVs written around the monochromator move — e.g. open/close shutters, "
+            "set attenuators, or trigger beamline interlocks.\n"
+            "<b>PV Name</b>: EPICS process variable.  "
+            "<b>Value</b>: numeric or string value to write.  "
+            "<b>When</b>: Pre = before mono moves; Post = after settle."
+        )
+        info_epv.setWordWrap(True)
+        epv.addWidget(info_epv)
+
+        self._energy_pv_table = QTableWidget(0, 3)
+        self._energy_pv_table.setHorizontalHeaderLabels(["PV Name", "Value", "When"])
+        self._energy_pv_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._energy_pv_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._energy_pv_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._energy_pv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._energy_pv_table.setMaximumHeight(160)
+        epv.addWidget(self._energy_pv_table)
+
+        epv_btns = QHBoxLayout()
+        add_pre_btn = QPushButton("Add Pre")
+        add_pre_btn.setToolTip("Add a PV to write before the mono energy change")
+        add_pre_btn.clicked.connect(lambda: self._add_energy_pv_row("Pre"))
+        add_post_btn = QPushButton("Add Post")
+        add_post_btn.setToolTip("Add a PV to write after the mono energy change (and settle)")
+        add_post_btn.clicked.connect(lambda: self._add_energy_pv_row("Post"))
+        rem_epv_btn = QPushButton("Remove")
+        rem_epv_btn.clicked.connect(self._remove_energy_pv_row)
+        epv_btns.addWidget(add_pre_btn)
+        epv_btns.addWidget(add_post_btn)
+        epv_btns.addWidget(rem_epv_btn)
+        epv_btns.addStretch()
+        epv.addLayout(epv_btns)
+
+        vbox.addWidget(energy_pvs_grp)
+
         vbox.addStretch()
         scroll.setWidget(container)
         return scroll
@@ -512,6 +557,26 @@ class SetupTab(QWidget):
             if r >= 0:
                 self._record_table.removeRow(r)
 
+    def _add_energy_pv_row(self, when="Pre", pv="", value=""):
+        r = self._energy_pv_table.rowCount()
+        self._energy_pv_table.insertRow(r)
+        self._energy_pv_table.setItem(r, 0, QTableWidgetItem(pv))
+        self._energy_pv_table.setItem(r, 1, QTableWidgetItem(str(value)))
+        when_cb = _NoScrollComboBox()
+        when_cb.addItems(["Pre", "Post"])
+        when_cb.setCurrentText(when)
+        self._energy_pv_table.setCellWidget(r, 2, when_cb)
+
+    def _remove_energy_pv_row(self):
+        rows = sorted(
+            {idx.row() for idx in self._energy_pv_table.selectedIndexes()}, reverse=True
+        )
+        if not rows:
+            rows = [self._energy_pv_table.rowCount() - 1]
+        for r in rows:
+            if r >= 0:
+                self._energy_pv_table.removeRow(r)
+
     def _subscribe_pvs(self):
         """Create CA monitors for all configured motor / PV names."""
         self._unsubscribe_pvs()
@@ -612,6 +677,28 @@ class SetupTab(QWidget):
                 record_pvs[lbl] = pv
         kwargs["record_pvs"] = record_pvs if record_pvs else None
 
+        # Build pre/post energy PV lists from the energy change table
+        pre_energy_pvs, post_energy_pvs = [], []
+        for r in range(self._energy_pv_table.rowCount()):
+            pv_item  = self._energy_pv_table.item(r, 0)
+            val_item = self._energy_pv_table.item(r, 1)
+            cb       = self._energy_pv_table.cellWidget(r, 2)
+            pv    = pv_item.text().strip()  if pv_item  else ""
+            raw_v = val_item.text().strip() if val_item else ""
+            when  = cb.currentText() if cb else "Pre"
+            if not pv:
+                continue
+            try:
+                value = float(raw_v)
+            except ValueError:
+                value = raw_v
+            if when == "Pre":
+                pre_energy_pvs.append((pv, value))
+            else:
+                post_energy_pvs.append((pv, value))
+        kwargs["pre_energy_pvs"]  = pre_energy_pvs  or None
+        kwargs["post_energy_pvs"] = post_energy_pvs or None
+
         return kwargs
 
     def reload_settings(self):
@@ -638,6 +725,17 @@ class SetupTab(QWidget):
             if lbl or pv:
                 rows.append((lbl, pv))
         self._settings.setValue("record_pvs", repr(rows))
+
+        # Save energy change PV table as list of (pv, value, when) tuples
+        epv_rows = []
+        for r in range(self._energy_pv_table.rowCount()):
+            pv    = (self._energy_pv_table.item(r, 0) or QTableWidgetItem()).text().strip()
+            value = (self._energy_pv_table.item(r, 1) or QTableWidgetItem()).text().strip()
+            cb    = self._energy_pv_table.cellWidget(r, 2)
+            when  = cb.currentText() if cb else "Pre"
+            if pv:
+                epv_rows.append((pv, value, when))
+        self._settings.setValue("energy_pvs", repr(epv_rows))
 
     def _load_settings(self):
         for key, w in self._pv_widgets.items():
@@ -670,5 +768,16 @@ class SetupTab(QWidget):
                 self._record_table.setRowCount(0)
                 for lbl, pv in rows:
                     self._add_record_row(lbl, pv)
+            except Exception:
+                pass
+
+        # Restore energy change PV table
+        raw_epv = self._settings.value("energy_pvs")
+        if raw_epv:
+            try:
+                epv_rows = eval(raw_epv)  # noqa: S307
+                self._energy_pv_table.setRowCount(0)
+                for pv, value, when in epv_rows:
+                    self._add_energy_pv_row(when, pv, value)
             except Exception:
                 pass
