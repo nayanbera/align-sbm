@@ -2626,6 +2626,7 @@ def align_beamline(
     x2_energy_pv        : object = None,
     energy_settle       : float = 2.0,
     filename            : str   = "alignment_results.csv",
+    autosave            : bool  = True,
     record_pvs          : dict  = None,
     record_settle       : float = 2.0,
     config              : object = None,
@@ -2725,6 +2726,7 @@ def align_beamline(
         record_pvs          = config.record_pvs
         record_settle       = config.record_settle
         filename            = config.filename
+        autosave            = config.autosave
         pre_energy_pvs      = config.pre_energy_pvs
         post_energy_pvs     = config.post_energy_pvs
 
@@ -2781,6 +2783,16 @@ def align_beamline(
     # ── CSV setup ─────────────────────────────────────────────────────────────
     # Columns: datetime | MonoE | Harmonic | UndE | Roll2 | X2 | <record_pvs>
     # Roll2 and X2 are the actual post-scan RBV values, not nominal table values.
+    _save_csv = (not simulate) and bool(filename) and autosave
+    if not _save_csv and verbose:
+        if simulate:
+            reason = "simulation mode"
+        elif not autosave:
+            reason = "autosave disabled"
+        else:
+            reason = "no filename"
+        print(f"  ℹ CSV save skipped ({reason})")
+
     fieldnames = ["datetime", "MonoE", "Harmonic", "UndE", "Roll2", "X2"]
     if record_pvs:
         fieldnames += list(record_pvs.keys())
@@ -2788,50 +2800,53 @@ def align_beamline(
     # Merge columns with any existing CSV rather than archiving it.
     # New columns (from added record_pvs) are appended; existing rows get "0".
     # Removed PVs whose columns already exist are kept; new rows get "0" via restval.
-    if os.path.exists(filename):
-        try:
-            with open(filename, "r", newline="") as _f:
-                existing_fields = csv.DictReader(_f).fieldnames or []
-        except Exception:
-            existing_fields = []
+    if _save_csv:
+        if os.path.exists(filename):
+            try:
+                with open(filename, "r", newline="") as _f:
+                    existing_fields = csv.DictReader(_f).fieldnames or []
+            except Exception:
+                existing_fields = []
 
-        if existing_fields:
-            # Union: preserve existing column order, append any brand-new columns
-            merged = list(existing_fields)
-            added  = []
-            for col in fieldnames:
-                if col not in merged:
-                    merged.append(col)
-                    added.append(col)
+            if existing_fields:
+                # Union: preserve existing column order, append any brand-new columns
+                merged = list(existing_fields)
+                added  = []
+                for col in fieldnames:
+                    if col not in merged:
+                        merged.append(col)
+                        added.append(col)
 
-            if added:
-                # Rewrite the file with the extra columns filled as "0"
-                try:
-                    with open(filename, "r", newline="") as _f:
-                        old_rows = list(csv.DictReader(_f))
-                    with open(filename, "w", newline="") as _f:
-                        _w = csv.DictWriter(_f, fieldnames=merged,
-                                            extrasaction="ignore", restval="0")
-                        _w.writeheader()
-                        for _r in old_rows:
-                            _w.writerow(_r)
-                    if verbose:
-                        print(f"  ℹ Added column(s) to CSV: {added} "
-                              f"(existing rows filled with 0)")
-                except Exception as _e:
-                    if verbose:
-                        print(f"  ⚠ Could not migrate CSV columns: {_e}")
+                if added:
+                    # Rewrite the file with the extra columns filled as "0"
+                    try:
+                        with open(filename, "r", newline="") as _f:
+                            old_rows = list(csv.DictReader(_f))
+                        with open(filename, "w", newline="") as _f:
+                            _w = csv.DictWriter(_f, fieldnames=merged,
+                                                extrasaction="ignore", restval="0")
+                            _w.writeheader()
+                            for _r in old_rows:
+                                _w.writerow(_r)
+                        if verbose:
+                            print(f"  ℹ Added column(s) to CSV: {added} "
+                                  f"(existing rows filled with 0)")
+                    except Exception as _e:
+                        if verbose:
+                            print(f"  ⚠ Could not migrate CSV columns: {_e}")
 
-            fieldnames = merged  # use the merged set for all new rows
+                fieldnames = merged  # use the merged set for all new rows
 
-    file_exists = os.path.exists(filename)
-    csv_file    = open(filename, "a", newline="")
-    # restval="0" fills in 0 for any column absent from a written record
-    # (handles the case where a record_pv was removed — column stays, value is 0).
-    writer      = csv.DictWriter(csv_file, fieldnames=fieldnames,
-                                 extrasaction="ignore", restval="0")
-    if not file_exists:
-        writer.writeheader()
+        file_exists = os.path.exists(filename)
+        csv_file    = open(filename, "a", newline="")
+        # restval="0" fills in 0 for any column absent from a written record
+        writer      = csv.DictWriter(csv_file, fieldnames=fieldnames,
+                                     extrasaction="ignore", restval="0")
+        if not file_exists:
+            writer.writeheader()
+    else:
+        csv_file = None
+        writer   = None
 
     # ── Main loop ─────────────────────────────────────────────────────────────
     for row_idx, row in enumerate(table):
@@ -3084,10 +3099,12 @@ def align_beamline(
                 for label, pv_name in record_pvs.items():
                     record[label] = _read_pv(pv_name)
             record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            writer.writerow(record)
-            csv_file.flush()
+            if writer:
+                writer.writerow(record)
+                csv_file.flush()
             results.append(record)
-            csv_file.close()
+            if csv_file:
+                csv_file.close()
             raise
 
         except Exception as exc:
@@ -3123,8 +3140,9 @@ def align_beamline(
                     print(f"    {label} ({lbl}) = {val:.6g}")
 
         record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        writer.writerow(record)
-        csv_file.flush()
+        if writer:
+            writer.writerow(record)
+            csv_file.flush()
         record["_brg2_center"]  = r_brg2.center  if r_brg2  and r_brg2.center  is not None else float("nan")
         record["_roll2_center"] = r_roll2.center if r_roll2 and r_roll2.center is not None else float("nan")
         record["_x2_center"]   = r_x2.center    if r_x2    and r_x2.center    is not None else float("nan")
@@ -3133,14 +3151,18 @@ def align_beamline(
         if row_cb: row_cb(record)
 
         if verbose:
-            print(f"\n  ✓ MonoE={mono_e} keV complete.  "
-                  f"Results appended to {filename}")
+            saved_msg = f"  Results appended to {filename}" if _save_csv else "  (CSV save skipped)"
+            print(f"\n  ✓ MonoE={mono_e} keV complete.  {saved_msg}")
 
-    csv_file.close()
+    if csv_file:
+        csv_file.close()
 
     if verbose:
         print(f"\n{'═'*60}")
-        print(f"  Alignment complete.  {len(results)} rows written to {filename}")
+        if _save_csv:
+            print(f"  Alignment complete.  {len(results)} rows written to {filename}")
+        else:
+            print(f"  Alignment complete.  {len(results)} rows (CSV save skipped)")
         print(f"{'═'*60}")
 
     return results
@@ -3297,6 +3319,7 @@ class BeamlineConfig:
     record_pvs          : dict    = None
     record_settle       : float   = 2.0
     filename            : str     = "alignment_results.csv"
+    autosave            : bool    = True   # write CSV after each alignment; always False in sim mode
     pre_energy_pvs      : list    = None  # [(pvname, value), ...] written before mono move
     post_energy_pvs     : list    = None  # [(pvname, value), ...] written after mono settle
 

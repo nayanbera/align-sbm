@@ -1,15 +1,16 @@
 """Statistical analysis dialog for alignment CSV data."""
 import csv
 import os
+from datetime import datetime as _dt
 
 import numpy as np
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTabWidget, QWidget, QTextBrowser, QFileDialog, QMessageBox,
     QListWidget, QListWidgetItem, QGroupBox, QComboBox, QSizePolicy,
-    QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QDateEdit,
 )
 
 try:
@@ -60,6 +61,7 @@ class StatsDialog(QDialog):
         self._data        = {}
         self._num_cols    = []
         self._n_rows      = 0
+        self._row_dates   = []
         self._report_html = ""
         # Trained models: col → {"mean_fn": callable, "std_fn": callable,
         #                         "train_r2": float, "cv_r2": float, "rmse": float}
@@ -94,6 +96,30 @@ class StatsDialog(QDialog):
         self._info_lbl = QLabel("No data loaded.")
         self._info_lbl.setStyleSheet("color: #888; font-size: 11px;")
         layout.addWidget(self._info_lbl)
+
+        # Date range filter row
+        dr = QHBoxLayout()
+        dr.addWidget(QLabel("Date range:"))
+        self._date_start = QDateEdit()
+        self._date_start.setDisplayFormat("yyyy-MM-dd")
+        self._date_start.setCalendarPopup(True)
+        self._date_start.setEnabled(False)
+        dr.addWidget(self._date_start)
+        dr.addWidget(QLabel("to"))
+        self._date_end = QDateEdit()
+        self._date_end.setDisplayFormat("yyyy-MM-dd")
+        self._date_end.setCalendarPopup(True)
+        self._date_end.setEnabled(False)
+        dr.addWidget(self._date_end)
+        reset_dr_btn = QPushButton("Reset")
+        reset_dr_btn.setFixedWidth(55)
+        reset_dr_btn.setToolTip("Reset to full date range")
+        reset_dr_btn.clicked.connect(self._reset_date_range)
+        dr.addWidget(reset_dr_btn)
+        dr.addStretch()
+        self._date_start.dateChanged.connect(self._refresh)
+        self._date_end.dateChanged.connect(self._refresh)
+        layout.addLayout(dr)
 
         # Column selector
         col_grp = QGroupBox("Columns to analyze")
@@ -315,6 +341,35 @@ class StatsDialog(QDialog):
 
         return widget
 
+    # ── Date range helpers ────────────────────────────────────────────────────
+
+    def _date_mask(self):
+        """Boolean index array selecting rows within the chosen date range."""
+        n = self._n_rows
+        if not n or not self._row_dates or not self._date_start.isEnabled():
+            return np.ones(n, dtype=bool)
+        qs = self._date_start.date()
+        qe = self._date_end.date()
+        d_start = _dt(qs.year(), qs.month(), qs.day()).date()
+        d_end   = _dt(qe.year(), qe.month(), qe.day()).date()
+        return np.array([
+            (d is not None and d_start <= d <= d_end)
+            for d in self._row_dates
+        ], dtype=bool)
+
+    def _reset_date_range(self):
+        valid = [d for d in self._row_dates if d is not None]
+        if not valid:
+            return
+        d_min, d_max = min(valid), max(valid)
+        self._date_start.blockSignals(True)
+        self._date_end.blockSignals(True)
+        self._date_start.setDate(QDate(d_min.year, d_min.month, d_min.day))
+        self._date_end.setDate(QDate(d_max.year, d_max.month, d_max.day))
+        self._date_start.blockSignals(False)
+        self._date_end.blockSignals(False)
+        self._refresh()
+
     # ── Data loading ──────────────────────────────────────────────────────────
 
     def _browse(self):
@@ -346,6 +401,15 @@ class StatsDialog(QDialog):
         self._trained  = {}
 
         raw = {k: [r.get(k, "").strip() for r in rows] for k in fieldnames}
+
+        # Parse datetime column for the date-range filter
+        self._row_dates = []
+        for v in raw.get("datetime", raw.get("Datetime", raw.get("DateTime", []))):
+            try:
+                self._row_dates.append(_dt.fromisoformat(v).date())
+            except (ValueError, TypeError):
+                self._row_dates.append(None)
+
         self._data    = {}
         self._num_cols = []
         for k, vals in raw.items():
@@ -356,6 +420,23 @@ class StatsDialog(QDialog):
                 self._num_cols.append(k)
             except (ValueError, TypeError):
                 pass
+
+        # Populate date range widgets
+        valid_dates = [d for d in self._row_dates if d is not None]
+        if valid_dates:
+            d_min = min(valid_dates)
+            d_max = max(valid_dates)
+            self._date_start.blockSignals(True)
+            self._date_end.blockSignals(True)
+            self._date_start.setDate(QDate(d_min.year, d_min.month, d_min.day))
+            self._date_end.setDate(QDate(d_max.year, d_max.month, d_max.day))
+            self._date_start.blockSignals(False)
+            self._date_end.blockSignals(False)
+            self._date_start.setEnabled(True)
+            self._date_end.setEnabled(True)
+        else:
+            self._date_start.setEnabled(False)
+            self._date_end.setEnabled(False)
 
         mono     = self._data.get("MonoE", np.array([]))
         unique_e = np.unique(mono) if len(mono) else np.array([])
@@ -447,8 +528,9 @@ class StatsDialog(QDialog):
                 w.setParent(None)
                 w.deleteLater()
 
-        d    = self._data
-        n    = self._n_rows
+        mask = self._date_mask()
+        d    = {k: v[mask] for k, v in self._data.items()}
+        n    = int(mask.sum())
         idx  = np.arange(n)
         mono = d.get("MonoE", np.zeros(n))
         ue   = np.unique(mono)
@@ -552,14 +634,17 @@ class StatsDialog(QDialog):
         if not self._data:
             return
 
+        mask = self._date_mask()
+        _d = {k: v[mask] for k, v in self._data.items()}
+
         # Determine training targets
-        sel_cols = [c for c in self._selected_cols() if c in self._data and c != "MonoE"]
+        sel_cols = [c for c in self._selected_cols() if c in _d and c != "MonoE"]
         if not sel_cols:
             QMessageBox.warning(self, "No columns",
                                 "Select at least one target column in 'Columns to analyze'.")
             return
 
-        mono = self._data.get("MonoE", np.array([]))
+        mono = _d.get("MonoE", np.array([]))
         if len(mono) == 0:
             QMessageBox.warning(self, "No MonoE", "CSV must have a MonoE column.")
             return
@@ -576,12 +661,12 @@ class StatsDialog(QDialog):
         use_means = self._use_means_cb.isChecked()
         if use_means:
             X_train = ue.reshape(-1, 1)
-            Y_trains = {col: np.array([self._data[col][mono == e].mean() for e in ue])
+            Y_trains = {col: np.array([_d[col][mono == e].mean() for e in ue])
                         for col in sel_cols}
         else:
             order    = np.argsort(mono)
             X_train  = mono[order].reshape(-1, 1)
-            Y_trains = {col: self._data[col][order] for col in sel_cols}
+            Y_trains = {col: _d[col][order] for col in sel_cols}
             n_unique  = len(X_train)   # for CV
 
         self._train_mono = X_train.ravel()
@@ -1061,9 +1146,10 @@ class StatsDialog(QDialog):
     """
 
     def _make_report(self, sel_cols):
-        d   = self._data
-        n   = self._n_rows
-        nc  = self._num_cols
+        mask = self._date_mask()
+        d    = {k: v[mask] for k, v in self._data.items()}
+        n    = int(mask.sum())
+        nc   = self._num_cols
         mono = d.get("MonoE", np.array([]))
         ue   = np.unique(mono) if len(mono) else np.array([])
         grp_cols = [c for c in sel_cols if c in d]
