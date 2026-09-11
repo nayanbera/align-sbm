@@ -77,6 +77,7 @@ _SCAN_DEFAULTS = {
     "fine_sigma_range": 3.0,
     "fine_nsteps":     21,
     "fine_scan_iter":   2,
+    "dmov_delay":       0.25,
     # Other
     "settle":           0.3,
     "energy_settle":    2.0,
@@ -440,6 +441,7 @@ class SetupTab(QWidget):
             ("fine_sigma_range", "Sigma range",   0.5, 20.0, 1, 0.5),
             ("fine_nsteps",      "N steps",         3, 201, 0, 1),
             ("fine_scan_iter",   "Max iterations",  1,  10, 0, 1),
+            ("dmov_delay",       "DMOV delay (s)", 0.0,  5.0, 2, 0.05),
         ]:
             if key in ("fine_nsteps", "fine_scan_iter"):
                 w = _int(_SCAN_DEFAULTS[key], lo=1, hi=201)
@@ -447,6 +449,10 @@ class SetupTab(QWidget):
                 w = _dbl(_SCAN_DEFAULTS[key], lo=lo, hi=hi, decimals=dec, step=step)
             self._scan_widgets[key] = w
             ff.addRow(label + ":", w)
+        self._scan_widgets["dmov_delay"].setToolTip(
+            "Wait this many seconds after issuing a motor move before polling DMOV.\n"
+            "Increase if the motor record takes time to clear DMOV (typical: 0.2–0.5 s)."
+        )
         vbox.addWidget(fine_grp)
 
         # Other

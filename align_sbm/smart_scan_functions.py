@@ -719,12 +719,14 @@ class _Interface:
                  simulate: bool, sim_center: float,
                  sim_sigma: float, sim_amp: float,
                  sim_offset: float, sim_noise: float,
-                 monitor_pv: str = ""):
+                 monitor_pv: str = "",
+                 dmov_delay: float = 0.25):
         self._sim   = simulate or not _EPICS_AVAILABLE
         self._pos   = 0.0
         self._pvaxis = None
         self._motor  = None
         self._mon_pv = None
+        self._dmov_delay = dmov_delay
         self._sim_c = sim_center
         self._sim_s = sim_sigma
         self._sim_a = sim_amp
@@ -770,7 +772,7 @@ class _Interface:
         if self._pvaxis is not None:
             return self._pvaxis.move(pos, timeout=timeout)
         self._motor.move(pos, wait=False)
-        time.sleep(0.15)
+        time.sleep(self._dmov_delay)
         t0 = time.monotonic()
         while True:
             try:
@@ -838,6 +840,7 @@ def smart_scan(
     fine_sigma_range    : float = 3.0,
     fine_nsteps         : int   = 21,
     fine_scan_iter      : int   = 2,
+    dmov_delay          : float = 0.25,
     plot                : bool  = False,
     simulate            : bool  = False,
     sim_center          : float = 1.5,
@@ -873,6 +876,7 @@ def smart_scan(
         sim_center=sim_center, sim_sigma=sim_sigma,
         sim_amp=sim_amplitude, sim_offset=sim_offset, sim_noise=sim_noise,
         monitor_pv=monitor_pv,
+        dmov_delay=dmov_delay,
     )
 
     current_pos = iface.position()
@@ -2635,6 +2639,7 @@ def align_beamline(
     fine_sigma_range    : float = 3.0,
     fine_nsteps         : int   = 21,
     fine_scan_iter      : int   = 2,
+    dmov_delay          : float = 0.25,
     backlash_correction : bool  = False,
     monitor_pv          : str   = "",
     monitor_brg2        : bool  = True,
@@ -2715,6 +2720,7 @@ def align_beamline(
         fine_sigma_range    = config.fine_sigma_range
         fine_nsteps         = config.fine_nsteps
         fine_scan_iter      = config.fine_scan_iter
+        dmov_delay          = config.dmov_delay
         plot                = config.plot
         backlash_correction = config.backlash_correction
         settle              = config.settle
@@ -2924,6 +2930,7 @@ def align_beamline(
                     move_to_peak=True, move_target="peak_pos",
                     fine_scan=fine_scan, fine_sigma_range=fine_sigma_range,
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
+                    dmov_delay=dmov_delay,
                     plot=plot,
                     backlash_correction=backlash_correction,
                     monitor_pv=monitor_pv if monitor_brg2 else "",
@@ -2999,6 +3006,7 @@ def align_beamline(
                     move_to_peak=True, move_target="centroid",
                     fine_scan=fine_scan, fine_sigma_range=fine_sigma_range,
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
+                    dmov_delay=dmov_delay,
                     plot=plot,
                     backlash_correction=backlash_correction,
                     monitor_pv=monitor_pv if monitor_roll2 else "",
@@ -3076,6 +3084,7 @@ def align_beamline(
                     move_to_peak=True, move_target="centroid",
                     fine_scan=fine_scan, fine_sigma_range=fine_sigma_range,
                     fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
+                    dmov_delay=dmov_delay,
                     plot=plot,
                     backlash_correction=backlash_correction,
                     monitor_pv=monitor_pv if monitor_x2 else "",
@@ -3308,6 +3317,7 @@ class BeamlineConfig:
     fine_sigma_range    : float   = 3.0
     fine_nsteps         : int     = 21
     fine_scan_iter      : int     = 2
+    dmov_delay          : float   = 0.25
     plot                : bool    = False   # show diagnostic plot after each scan
     backlash_correction : bool    = False   # overshoot by FWHM to eliminate backlash
     settle              : float   = 0.3
@@ -3507,6 +3517,7 @@ def setup_beamline(
     fine_sigma_range    : float = 3.0,
     fine_nsteps         : int   = 21,
     fine_scan_iter      : int   = 2,
+    dmov_delay          : float = 0.25,
     plot                : bool  = False,
     backlash_correction : bool  = False,
     settle              : float = 0.3,
@@ -3544,6 +3555,7 @@ def setup_beamline(
         x2_start=x2_start, x2_stop=x2_stop, x2_nsteps=x2_nsteps,
         fine_scan=fine_scan, fine_sigma_range=fine_sigma_range,
         fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
+        dmov_delay=dmov_delay,
         plot=plot,
         backlash_correction=backlash_correction,
         settle=settle, det_update_interval=det_update_interval,
