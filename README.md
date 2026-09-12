@@ -97,6 +97,17 @@ Defaults:
 
 All numeric fields accept typed values of any magnitude (no spinner clamping).
 
+**Fine Scan group** additionally exposes:
+
+| Field | Default | Description |
+|---|---|---|
+| Sigma range | 3.0 | Fine window half-width in σ units |
+| N steps | 21 | Steps in the fine sweep |
+| Max iterations | 2 | How many successive fine refinements to run |
+| DMOV delay (s) | 0.25 | Wait this many seconds after issuing a motor move before polling the DMOV done flag. Increase if the motor record is slow to clear DMOV (typical: 0.2–0.5 s). |
+
+**Output CSV row** includes an **Autosave** checkbox. When checked (default), results are appended to the CSV after every completed alignment. Uncheck to run without writing to disk. In Simulation mode the CSV is never written regardless of this setting.
+
 ---
 
 ### Energy Table
@@ -195,6 +206,8 @@ On scan completion the fitted curve (red line) and peak marker (dashed orange ve
 
 Opened via **Analyze…** in the CSV tab. Accepts any alignment CSV (auto-loaded from the current file; use *Browse…* to pick another).
 
+A **Date range** filter row (start / end date pickers + Reset button) appears below the file info line. When a CSV with a `datetime` column is loaded, the pickers default to the full date range. Changing either date immediately re-runs all plots, the report, and model training — only rows within the selected range are included in the statistics.
+
 **Plots tab** — interactive matplotlib figure with zoom/pan toolbar, arranged in a 3 × 2 grid:
 
 | Position | Plot |
@@ -263,6 +276,10 @@ With `peak_method="stats"` (default) all metrics are model-free (centroid, RMS w
 ### Backlash correction
 
 When `backlash_correction=True`, the motor overshoots the target by one FWHM in the direction opposite to the scan, then approaches from the scan direction — ensuring a consistent final approach.
+
+### DMOV delay
+
+EPICS motor records may take 0.2 s or more to clear the DMOV (done-moving) flag after a move command is issued. The `dmov_delay` parameter (default **0.25 s**) inserts a fixed sleep between the move command and the start of DMOV polling, preventing false "done" reads on slow motor records. It is applied in every stepped motor move (`smart_scan`, `align_beamline`) and is configurable from the Fine Scan group in the Setup tab.
 
 ---
 
