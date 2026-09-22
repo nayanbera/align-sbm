@@ -164,20 +164,21 @@ class _ColorRuleDialog(QDialog):
     def __init__(self, rules, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Color Coding Rules")
-        self.setMinimumWidth(580)
+        self.setMinimumWidth(700)
         self.setMinimumHeight(300)
 
         vbox = QVBoxLayout(self)
 
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["Operator", "Value", "Value 2", "Color", ""])
+        self._table = QTableWidget(0, 6)
+        self._table.setHorizontalHeaderLabels(["Operator", "Value", "Value 2", "Label", "Color", ""])
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(4, 32)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(5, 32)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         vbox.addWidget(self._table)
@@ -224,17 +225,21 @@ class _ColorRuleDialog(QDialog):
             v2.setEnabled(text in ("in range", "out of range"))
         op_combo.currentTextChanged.connect(_on_op)
 
+        label_edit = QLineEdit(str(rule.get("label", "")))
+        label_edit.setPlaceholderText("optional display text")
+        self._table.setCellWidget(r, 3, label_edit)
+
         color_hex = rule.get("color", "#4caf50")
         color_btn = QPushButton()
         color_btn.setToolTip("Click to choose a color")
         self._set_color_btn(color_btn, color_hex)
         color_btn.clicked.connect(self._pick_color)
-        self._table.setCellWidget(r, 3, color_btn)
+        self._table.setCellWidget(r, 4, color_btn)
 
         rm_btn = QPushButton("✕")
         rm_btn.setMaximumWidth(32)
         rm_btn.clicked.connect(self._remove_row)
-        self._table.setCellWidget(r, 4, rm_btn)
+        self._table.setCellWidget(r, 5, rm_btn)
 
     @staticmethod
     def _set_color_btn(btn, hex_color):
@@ -258,23 +263,25 @@ class _ColorRuleDialog(QDialog):
     def _remove_row(self):
         btn = self.sender()
         for r in range(self._table.rowCount()):
-            if self._table.cellWidget(r, 4) is btn:
+            if self._table.cellWidget(r, 5) is btn:
                 self._table.removeRow(r)
                 return
 
     def get_rules(self):
         rules = []
         for r in range(self._table.rowCount()):
-            op_w   = self._table.cellWidget(r, 0)
-            val_w  = self._table.cellWidget(r, 1)
-            val2_w = self._table.cellWidget(r, 2)
-            col_w  = self._table.cellWidget(r, 3)
+            op_w    = self._table.cellWidget(r, 0)
+            val_w   = self._table.cellWidget(r, 1)
+            val2_w  = self._table.cellWidget(r, 2)
+            label_w = self._table.cellWidget(r, 3)
+            col_w   = self._table.cellWidget(r, 4)
             if not (op_w and val_w and col_w):
                 continue
             rules.append({
                 "op":     op_w.currentText(),
                 "value":  val_w.text().strip(),
                 "value2": val2_w.text().strip() if val2_w else "",
+                "label":  label_w.text().strip() if label_w else "",
                 "color":  col_w.property("color_hex") or "#4caf50",
             })
         return rules
@@ -1251,12 +1258,14 @@ class AlignTab(QWidget):
             val       = rule.get("value", "")
             val2      = rule.get("value2", "")
             hex_color = rule.get("color", "#ffffff")
+            user_lbl  = rule.get("label", "")
             sym       = _OP_SYMS.get(op, op)
-            text      = f"{val} {sym} {val2}" if op in ("in range", "out of range") else f"{sym} {val}"
+            cond_text = f"{val} {sym} {val2}" if op in ("in range", "out of range") else f"{sym} {val}"
+            chip_text = user_lbl if user_lbl else cond_text
             c         = QColor(hex_color)
             lum       = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
             fg        = "#000000" if lum > 128 else "#ffffff"
-            chip = QLabel(f"  {text}  ")
+            chip = QLabel(f"  {chip_text}  ")
             chip.setStyleSheet(
                 f"background-color: {hex_color}; color: {fg}; "
                 "border-radius: 3px; padding: 1px 4px; font-size: 10px;"
