@@ -10,10 +10,21 @@ from PyQt6.QtWidgets import (
 
 from .smart_scan_functions import table400
 
-_COLS = ["MonoE (keV)", "Harmonic", "UndE (eV)", "Roll2 (mdeg)", "X2 (μm)", "Crystal", "Updated"]
+_COLS = ["MonoE (keV)", "Harmonic", "UndE (eV)", "Roll2 (mdeg)", "X2 (μm)",
+         "Roll1 (mdeg)", "Crystal", "Updated"]
 _KEYS = ["MonoE", "Harmonic", "UndE", "Roll2", "X2"]
-_CRYSTAL_COL = len(_KEYS)       # 5
-_UPDATED_COL  = len(_KEYS) + 1  # 6
+_ROLL1_COL   = len(_KEYS)       # 5
+_CRYSTAL_COL = len(_KEYS) + 1   # 6
+_UPDATED_COL  = len(_KEYS) + 2  # 7
+
+# Save-array indices (separate from table column indices):
+#   [0-4] floats: MonoE Harmonic UndE Roll2 X2
+#   [5]   str:    timestamp
+#   [6]   str:    crystal name
+#   [7]   str:    Roll1 RBV
+_SAVE_TS      = 5
+_SAVE_CRYSTAL = 6
+_SAVE_ROLL1   = 7
 
 
 class _NoScrollComboBox(QComboBox):
@@ -26,8 +37,9 @@ class EnergyTab(QWidget):
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
-        self._settings       = settings
+        self._settings        = settings
         self._crystal_choices: list = []
+        self._auto_fill_fn    = None   # callable() → {"crystal": str, "roll1": str}
         self._build_ui()
         self._load_settings()
 
@@ -41,6 +53,7 @@ class EnergyTab(QWidget):
             "<b>UndE</b> (undulator energy), "
             "<b>Roll2</b> (nominal Roll2 encoder value), "
             "<b>X2</b> (nominal X2 position), "
+            "<b>Roll1</b> (Roll1 position at this energy), "
             "<b>Crystal</b> (crystal for this energy range)."
         )
         info.setWordWrap(True)
@@ -51,7 +64,7 @@ class EnergyTab(QWidget):
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setStretchLastSection(False)
-        for c, width in enumerate([90, 80, 90, 100, 90, 110, 150]):
+        for c, width in enumerate([90, 80, 90, 100, 90, 100, 110, 150]):
             self._table.setColumnWidth(c, width)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSortingEnabled(True)
@@ -80,6 +93,10 @@ class EnergyTab(QWidget):
         layout.addLayout(btn_row)
 
     # ── public API ──────────────────────────────────────────────────────────
+
+    def set_auto_fill_fn(self, fn):
+        """Set a callable invoked when Add Row is clicked: fn() → {"crystal": str, "roll1": str}."""
+        self._auto_fill_fn = fn
 
     def set_crystal_choices(self, names: list):
         """Update the dropdown options in every Crystal cell; preserves current selection."""
@@ -110,7 +127,7 @@ class EnergyTab(QWidget):
         for r in range(self._table.rowCount()):
             try:
                 row = []
-                for c in range(len(_KEYS)):   # only the 5 data columns
+                for c in range(len(_KEYS)):
                     item = self._table.item(r, c)
                     text = item.text().strip() if item else ""
                     row.append(float(text) if text else 0.0)
@@ -128,7 +145,7 @@ class EnergyTab(QWidget):
         return [all_rows[i] for i in selected if i < len(all_rows)]
 
     def get_row_labels(self):
-        """Return display strings like '7.112 keV · Si111' for the alignment tab list."""
+        """Return display strings for the alignment tab list, including crystal if set."""
         labels = []
         for r in range(self._table.rowCount()):
             item = self._table.item(r, 0)
@@ -178,10 +195,15 @@ class EnergyTab(QWidget):
                     item = self._table.item(r, c)
                     text = item.text().strip() if item else ""
                     row.append(float(text) if text else 0.0)
+                # index 5: timestamp
                 ts_item = self._table.item(r, _UPDATED_COL)
                 row.append(ts_item.text() if ts_item else "")
+                # index 6: crystal
                 cb = self._table.cellWidget(r, _CRYSTAL_COL)
                 row.append(cb.currentText() if cb else "")
+                # index 7: roll1
+                roll1_item = self._table.item(r, _ROLL1_COL)
+                row.append(roll1_item.text() if roll1_item else "")
                 rows.append(row)
             except ValueError:
                 pass
@@ -212,6 +234,14 @@ class EnergyTab(QWidget):
         self.rows_changed.emit()
 
     def _append_row(self, values=None):
+        """Append one row from a saved-data array.
+
+        Save-array layout (for backwards compatibility):
+          [0-4]  floats  MonoE Harmonic UndE Roll2 X2
+          [5]    str     timestamp          (old saves: 6 elements)
+          [6]    str     crystal name       (added 2026-09-22, 7+ elements)
+          [7]    str     Roll1 RBV          (added 2026-09-22, 8+ elements)
+        """
         self._table.setSortingEnabled(False)
         r = self._table.rowCount()
         self._table.insertRow(r)
@@ -224,9 +254,14 @@ class EnergyTab(QWidget):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(r, c, item)
 
-        # Crystal column (5) — QComboBox; saved at index 6 in vals
-        # Backwards-compat: old saves had [MonoE..X2, timestamp] (6 elements, no crystal)
-        crystal_name = str(vals[6]) if len(vals) > 6 else ""
+        # Roll1 column (5) — plain editable text
+        roll1_text = str(vals[_SAVE_ROLL1]) if len(vals) > _SAVE_ROLL1 else ""
+        roll1_item = QTableWidgetItem(roll1_text)
+        roll1_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._table.setItem(r, _ROLL1_COL, roll1_item)
+
+        # Crystal column (6) — dropdown
+        crystal_name = str(vals[_SAVE_CRYSTAL]) if len(vals) > _SAVE_CRYSTAL else ""
         cb = _NoScrollComboBox()
         cb.addItem("")
         cb.addItems(self._crystal_choices)
@@ -234,8 +269,8 @@ class EnergyTab(QWidget):
         cb.currentTextChanged.connect(self.rows_changed)
         self._table.setCellWidget(r, _CRYSTAL_COL, cb)
 
-        # Updated column (6) — read-only; saved at index 5 in vals
-        ts_text = str(vals[5]) if len(vals) > 5 else ""
+        # Updated column (7) — read-only timestamp
+        ts_text = str(vals[_SAVE_TS]) if len(vals) > _SAVE_TS else ""
         updated_item = QTableWidgetItem(ts_text)
         updated_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         updated_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -244,7 +279,19 @@ class EnergyTab(QWidget):
         self._table.setSortingEnabled(True)
 
     def _add_row(self):
-        self._append_row()
+        """Add a blank row, auto-filling Roll1 and Crystal from the current live state."""
+        extras = {}
+        if self._auto_fill_fn is not None:
+            try:
+                extras = self._auto_fill_fn() or {}
+            except Exception:
+                pass
+        # Build an 8-element values array with blanks for data cols
+        values = [0.0, 0.0, 0.0, 0.0, 0.0,   # MonoE..X2
+                  "",                           # timestamp
+                  extras.get("crystal", ""),    # crystal
+                  extras.get("roll1", "")]      # Roll1
+        self._append_row(values)
 
     def _remove_row(self):
         rows = sorted({idx.row() for idx in self._table.selectedIndexes()}, reverse=True)

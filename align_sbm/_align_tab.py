@@ -587,6 +587,9 @@ class AlignTab(QWidget):
         self._crystal_widget.mappings_changed.connect(self._sync_crystal_choices)
         self._sync_crystal_choices()  # populate on startup
 
+        # Auto-fill Roll1 + Crystal when a new energy row is added
+        self._energy_tab.set_auto_fill_fn(self._energy_auto_fill)
+
     def _build_ui(self):
         root = QHBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -748,6 +751,13 @@ class AlignTab(QWidget):
     def _sync_crystal_choices(self):
         """Push current crystal display names from the status widget to the energy table."""
         self._energy_tab.set_crystal_choices(self._crystal_widget.get_display_names())
+
+    def _energy_auto_fill(self) -> dict:
+        """Return current Roll1 RBV and crystal for auto-filling a new energy table row."""
+        return {
+            "crystal": self._crystal_widget.current_display_name(),
+            "roll1":   self._setup_tab.get_roll1_rbv(),
+        }
 
     # ── Right: per-motor plot tabs + bottom tab (Results | Log) ─────────────
 

@@ -29,6 +29,7 @@ _PV_DEFAULTS = {
     "detector":       "ID15A2:det:Signal",
     "monitor_pv":     "",
     "brg2":           "ID15A2:BRG2",
+    "roll1_motor":    "",
     "roll2_motor":    "ID15A2:Roll2",
     "x2_motor":       "ID15A2:X2",
     "pitch_pv":       "ID15A2:PitchPiezo:SP",
@@ -198,6 +199,7 @@ class SetupTab(QWidget):
         mf = QFormLayout(motor_grp)
         for key, label, tip in [
             ("brg2",        "BRG2",   "Bragg 2 motor record base PV"),
+            ("roll1_motor", "Roll1",  "Roll1 motor record base PV (used to read current position for energy table)"),
             ("roll2_motor", "Roll2",  "Roll2 motor record base PV"),
             ("x2_motor",    "X2",     "X2 motor record base PV"),
         ]:
@@ -603,7 +605,7 @@ class SetupTab(QWidget):
         from .smart_scan_functions import create_pv_monitor
         bridge = self._bridge
         pv_map = {}
-        for key in ("brg2", "roll2_motor", "x2_motor"):
+        for key in ("brg2", "roll1_motor", "roll2_motor", "x2_motor"):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv + ".RBV"
@@ -662,13 +664,21 @@ class SetupTab(QWidget):
     def get_output_filename(self) -> str:
         return self._scan_widgets["filename"].text().strip()
 
+    def get_roll1_rbv(self) -> str:
+        """Return the current Roll1 RBV as a string, or '' if not configured/connected."""
+        lbl = self._rbk_labels.get("roll1_motor")
+        if lbl is None:
+            return ""
+        text = lbl.text().strip()
+        return "" if text in ("—", "…") else text
+
     # ── Public API ───────────────────────────────────────────────────────────
 
     def get_kwargs(self):
         """Return dict suitable for passing directly to align_beamline()."""
         kwargs = {}
         for key, w in self._pv_widgets.items():
-            if key == "pv_prefix":
+            if key in ("pv_prefix", "roll1_motor"):
                 continue
             kwargs[key] = w.text().strip()
 
