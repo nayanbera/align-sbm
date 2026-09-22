@@ -1,7 +1,7 @@
 """Hold Conditions panel — suspends alignment when EPICS PV conditions fail."""
 import json
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QHeaderView,
@@ -21,27 +21,32 @@ class HoldConditionsWidget(QGroupBox):
     """
     Checkable group box listing PV conditions that suspend the alignment.
     When the group box is checked, hold monitoring is active.
+    PV values are received via CA monitors (epics.PV callbacks), not polled.
     """
 
     config_changed    = pyqtSignal()
-    # Emitted from the Qt main thread (via _poll_timer) — never from the worker.
+    # Emitted from the Qt main thread — never from the worker.
     suspend_triggered = pyqtSignal(str)   # conditions are active → suspend
     suspend_cleared   = pyqtSignal()      # conditions cleared → resume
+
+    # Fired from the CA thread when any subscribed PV changes; processed in Qt thread.
+    _pv_changed = pyqtSignal()
 
     def __init__(self, settings, parent=None):
         super().__init__("Hold Conditions")
         self.setCheckable(True)
         self.setChecked(False)
-        self._settings         = settings
+        self._settings          = settings
         self._conditions_active = False
         self._active_msg        = ""
-        self._build_ui()
-        self._load_settings()
+        self._pv_subs: dict     = {}   # pvname -> epics.PV
+        self._pv_values: dict   = {}   # pvname -> latest value (or None if disconnected)
+        self._loading           = False
 
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(6000)   # refresh status every 6 s
-        self._poll_timer.timeout.connect(self._update_status)
-        self._poll_timer.start()
+        self._build_ui()
+        self._pv_changed.connect(self._evaluate_conditions)
+        self.toggled.connect(self._evaluate_conditions)
+        self._load_settings()
 
     # ── UI construction ───────────────────────────────────────────────────────
 
@@ -78,7 +83,7 @@ class HoldConditionsWidget(QGroupBox):
         self._table.setMaximumHeight(150)
         self._table.setMinimumHeight(50)
         self._table.setAlternatingRowColors(True)
-        self._table.itemChanged.connect(lambda _: self.config_changed.emit())
+        self._table.itemChanged.connect(self._on_item_changed)
         vbox.addWidget(self._table)
 
         # Add / Remove buttons
@@ -111,7 +116,8 @@ class HoldConditionsWidget(QGroupBox):
         op_cb = _NoScrollComboBox()
         op_cb.addItems(_OPS)
         op_cb.setCurrentText(op)
-        op_cb.currentIndexChanged.connect(lambda: self.config_changed.emit())
+        op_cb.currentIndexChanged.connect(lambda: (self.config_changed.emit(),
+                                                    self._evaluate_conditions()))
         self._table.setCellWidget(r, 1, op_cb)
 
         val_item = QTableWidgetItem(str(value))
@@ -120,7 +126,8 @@ class HoldConditionsWidget(QGroupBox):
 
         chk = QCheckBox()
         chk.setChecked(enabled)
-        chk.stateChanged.connect(lambda: self.config_changed.emit())
+        chk.stateChanged.connect(lambda: (self.config_changed.emit(),
+                                          self._resubscribe()))
         chk_wrap = QWidget()
         hl = QHBoxLayout(chk_wrap)
         hl.addWidget(chk)
@@ -135,6 +142,8 @@ class HoldConditionsWidget(QGroupBox):
 
         self._table.blockSignals(False)
         self.config_changed.emit()
+        if not self._loading:
+            self._resubscribe()
 
     def _remove_row(self):
         rows = sorted({i.row() for i in self._table.selectedIndexes()}, reverse=True)
@@ -144,29 +153,106 @@ class HoldConditionsWidget(QGroupBox):
             if r >= 0:
                 self._table.removeRow(r)
         self.config_changed.emit()
+        self._resubscribe()
 
-    # ── Live status ───────────────────────────────────────────────────────────
+    def _on_item_changed(self, item):
+        """PV name or threshold value edited in the table — re-sync subscriptions."""
+        self.config_changed.emit()
+        if item.column() == 0:   # PV name changed
+            self._resubscribe()
+        else:                     # threshold changed — re-evaluate with cached value
+            self._evaluate_conditions()
 
-    def _update_status(self):
-        """Poll all enabled PVs and update status dots + summary label."""
+    # ── CA monitor management ─────────────────────────────────────────────────
+
+    def _active_pv_names(self) -> set:
+        """Return the set of PV names from all enabled, non-empty rows."""
+        names = set()
+        for r in range(self._table.rowCount()):
+            pv_item  = self._table.item(r, 0)
+            chk_wrap = self._table.cellWidget(r, 3)
+            if not (pv_item and chk_wrap):
+                continue
+            chk = chk_wrap.findChild(QCheckBox)
+            if chk and not chk.isChecked():
+                continue
+            pv = pv_item.text().strip()
+            if pv:
+                names.add(pv)
+        return names
+
+    def _resubscribe(self):
+        """Sync CA subscriptions to match the current set of enabled PVs."""
+        try:
+            from .smart_scan_functions import _EPICS_AVAILABLE
+            if not _EPICS_AVAILABLE:
+                return
+            from epics import PV
+        except Exception:
+            return
+
+        wanted  = self._active_pv_names()
+        current = set(self._pv_subs.keys())
+
+        for pv_name in current - wanted:
+            try:
+                self._pv_subs[pv_name].disconnect()
+            except Exception:
+                pass
+            self._pv_subs.pop(pv_name, None)
+            self._pv_values.pop(pv_name, None)
+
+        for pv_name in wanted - current:
+            def _make_cb(name):
+                def _val_cb(pvname=None, value=None, char_value=None, **kw):
+                    self._pv_values[name] = char_value if char_value is not None else value
+                    self._pv_changed.emit()
+                def _conn_cb(pvname=None, conn=False, **kw):
+                    if not conn:
+                        self._pv_values.pop(name, None)
+                        self._pv_changed.emit()
+                return _val_cb, _conn_cb
+
+            val_cb, conn_cb = _make_cb(pv_name)
+            self._pv_subs[pv_name] = PV(
+                pv_name,
+                callback=val_cb,
+                connection_callback=conn_cb,
+                auto_monitor=True,
+            )
+
+        self._evaluate_conditions()
+
+    def _unsubscribe_all(self):
+        for pv_obj in self._pv_subs.values():
+            try:
+                pv_obj.disconnect()
+            except Exception:
+                pass
+        self._pv_subs.clear()
+        self._pv_values.clear()
+
+    # ── Condition evaluation ──────────────────────────────────────────────────
+
+    def _evaluate_conditions(self):
+        """Re-evaluate all conditions using cached PV values; update dots and status."""
         if not self.isChecked():
             self._status_lbl.setText("Disabled")
             self._status_lbl.setStyleSheet("font-size: 11px; color: #888;")
             return
 
         try:
-            from .smart_scan_functions import _EPICS_AVAILABLE
+            from .smart_scan_functions import _EPICS_AVAILABLE, _eval_condition
             if not _EPICS_AVAILABLE:
                 self._status_lbl.setText("Simulation mode — conditions not checked")
                 self._status_lbl.setStyleSheet("font-size: 11px; color: #888;")
                 return
-            import epics
         except Exception:
             return
 
-        from .smart_scan_functions import _eval_condition
+        logic    = self._logic_cb.currentIndex()   # 0 = any, 1 = all
+        results  = []   # (triggered: bool, description: str)
 
-        active = []
         for r in range(self._table.rowCount()):
             pv_item  = self._table.item(r, 0)
             val_item = self._table.item(r, 2)
@@ -188,45 +274,66 @@ class HoldConditionsWidget(QGroupBox):
                 dot.setStyleSheet("color: #555;")
                 continue
 
-            try:
-                actual = epics.caget(pv, timeout=1.0)
-                if actual is None:
-                    dot.setStyleSheet("color: #888;")
-                    continue
-                # red dot = condition is True = suspension would trigger
-                triggered = _eval_condition(actual, op, val)
-                dot.setStyleSheet("color: #c62828;" if triggered else "color: #2e7d32;")
-                if triggered:
-                    active.append(f"{pv} {op} {val} (={actual})")
-            except Exception:
-                dot.setStyleSheet("color: #888;")
+            if pv not in self._pv_values:
+                dot.setStyleSheet("color: #888;")   # not yet received
+                results.append((False, None))
+                continue
 
-        new_active = bool(active)
-        msg        = "; ".join(active)
+            actual = self._pv_values[pv]
+            if actual is None:
+                dot.setStyleSheet("color: #888;")   # disconnected
+                results.append((False, None))
+                continue
+
+            try:
+                triggered = _eval_condition(actual, op, val)
+            except Exception:
+                triggered = False
+
+            dot.setStyleSheet("color: #c62828;" if triggered else "color: #2e7d32;")
+            results.append((triggered, f"{pv} {op} {val} (={actual})"))
+
+        # Apply logic gate across enabled rows
+        triggered_descs = [desc for trig, desc in results if trig and desc]
+        unknown         = any(desc is None for _, desc in results)
+
+        if logic == 0:   # any
+            new_active = bool(triggered_descs)
+        else:            # all — only if every enabled row with a known value triggered
+            known = [(t, d) for t, d in results if d is not None]
+            new_active = bool(known) and all(t for t, _ in known)
+            if new_active:
+                triggered_descs = [d for t, d in known if t]
+
+        msg = "; ".join(triggered_descs)
 
         if new_active:
             self._status_lbl.setText("⛔ Active: " + msg)
             self._status_lbl.setStyleSheet("font-size: 11px; color: #ef5350;")
+        elif unknown and not triggered_descs:
+            self._status_lbl.setText("◌ Waiting for PV values…")
+            self._status_lbl.setStyleSheet("font-size: 11px; color: #888;")
         else:
             self._status_lbl.setText("✓ No conditions triggered")
             self._status_lbl.setStyleSheet("font-size: 11px; color: #66bb6a;")
 
-        # Emit state-change signals — used by AlignTab to call worker.suspend/resume
         if new_active and not self._conditions_active:
-            self._active_msg = msg
+            self._active_msg        = msg
             self._conditions_active = True
             self.suspend_triggered.emit(msg)
         elif not new_active and self._conditions_active:
-            self._active_msg = ""
+            self._active_msg        = ""
             self._conditions_active = False
             self.suspend_cleared.emit()
+
+    # ── Worker sync ───────────────────────────────────────────────────────────
 
     def sync_worker(self, worker):
         """Pre-sync current hold state to a freshly created worker.
 
         Called from _launch_worker() right after worker.start() so that if
         conditions were already active when the alignment was launched the
-        worker is immediately suspended — without waiting for the next 6s poll.
+        worker is immediately suspended — without waiting for a CA update.
         """
         if self.isChecked() and self._conditions_active:
             worker.suspend(self._active_msg)
@@ -270,6 +377,7 @@ class HoldConditionsWidget(QGroupBox):
     # ── Settings persistence ──────────────────────────────────────────────────
 
     def reload_settings(self):
+        self._unsubscribe_all()
         self._table.setRowCount(0)
         self._load_settings()
 
@@ -286,12 +394,12 @@ class HoldConditionsWidget(QGroupBox):
             return
         self.setChecked(bool(cfg.get("enabled", False)))
         logic = cfg.get("logic", "any_triggered")
-        # backward-compat: map old "any_fail"/"all_fail" keys to new names
         if logic == "any_fail":
             logic = "any_triggered"
         elif logic == "all_fail":
             logic = "all_triggered"
         self._logic_cb.setCurrentIndex(0 if logic == "any_triggered" else 1)
+        self._loading = True
         for cond in cfg.get("conditions", []):
             self._add_row(
                 pv=cond.get("pv", ""),
@@ -299,3 +407,5 @@ class HoldConditionsWidget(QGroupBox):
                 value=str(cond.get("value", "")),
                 enabled=bool(cond.get("enabled", True)),
             )
+        self._loading = False
+        self._resubscribe()
