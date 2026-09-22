@@ -482,11 +482,18 @@ class AlignTab(QWidget):
         open_csv_btn = QPushButton("Open CSV…")
         open_csv_btn.setToolTip(
             "Open an existing CSV file to append new results to it.\n"
-            "New record PV columns are added automatically (existing rows → 0).\n"
+            "New record PV columns are added automatically (existing rows → current PV value).\n"
             "Removed record PV columns are kept (new rows → 0)."
         )
         open_csv_btn.clicked.connect(self._open_csv)
         csv_hdr.addWidget(open_csv_btn)
+        add_col_btn = QPushButton("Add Column…")
+        add_col_btn.setToolTip(
+            "Add a new column to the CSV file.\n"
+            "All existing rows are filled with the current value of the chosen PV."
+        )
+        add_col_btn.clicked.connect(self._add_csv_column)
+        csv_hdr.addWidget(add_col_btn)
         del_btn = QPushButton("Delete Row(s)")
         del_btn.setToolTip("Permanently remove selected rows from the CSV file")
         del_btn.setStyleSheet(
@@ -677,6 +684,93 @@ class AlignTab(QWidget):
         from ._stats_dialog import StatsDialog
         dlg = StatsDialog(csv_path=self._csv_path, energy_tab=self._energy_tab, parent=self)
         dlg.exec()
+
+    def _add_csv_column(self):
+        """Prompt for a column label + PV, caget the current value, backfill all rows."""
+        import os
+        from PyQt6.QtWidgets import (QDialog, QFormLayout, QDialogButtonBox,
+                                     QCheckBox)
+        from .smart_scan_functions import caget, add_csv_column
+
+        path = self._csv_path
+        if not path or not os.path.isfile(path):
+            QMessageBox.warning(self, "Add Column",
+                                "No CSV file is currently open.\n"
+                                "Use 'Open CSV…' first.")
+            return
+
+        # ── Dialog ────────────────────────────────────────────────────────────
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add Column to CSV")
+        dlg.setMinimumWidth(360)
+        form = QFormLayout(dlg)
+
+        label_edit = QLineEdit()
+        label_edit.setPlaceholderText("e.g. ring_current")
+        form.addRow("Column label:", label_edit)
+
+        pv_edit = QLineEdit()
+        pv_edit.setPlaceholderText("e.g. S:SRcurrentAI")
+        form.addRow("PV name:", pv_edit)
+
+        also_record_cb = QCheckBox("Also add to Record PVs in Setup tab")
+        also_record_cb.setToolTip(
+            "If checked, this PV will also be appended to the Record PVs table\n"
+            "so future alignment rows record it automatically."
+        )
+        form.addRow("", also_record_cb)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        label  = label_edit.text().strip()
+        pv_name = pv_edit.text().strip()
+
+        if not label:
+            QMessageBox.warning(self, "Add Column", "Column label cannot be empty.")
+            return
+        if not pv_name:
+            QMessageBox.warning(self, "Add Column", "PV name cannot be empty.")
+            return
+
+        # ── Read current PV value ─────────────────────────────────────────────
+        live = caget(pv_name)
+        if live is None:
+            reply = QMessageBox.question(
+                self, "Add Column",
+                f"Could not read PV '{pv_name}' (EPICS unavailable or timeout).\n\n"
+                f"Fill existing rows with 0 instead?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            fill_value = "0"
+        else:
+            fill_value = str(live)
+
+        # ── Write column ──────────────────────────────────────────────────────
+        err = add_csv_column(path, label, fill_value)
+        if err:
+            QMessageBox.critical(self, "Add Column", f"Failed to add column:\n{err}")
+            return
+
+        # ── Optionally add to Record PVs table ────────────────────────────────
+        if also_record_cb.isChecked():
+            self._setup_tab._add_record_row(label, pv_name)
+
+        self._refresh_csv()
+        QMessageBox.information(
+            self, "Add Column",
+            f"Column '{label}' added.\n"
+            f"All {self._csv_table.rowCount()} existing rows filled with {fill_value}."
+        )
 
     # ── Alignment control ────────────────────────────────────────────────────
 

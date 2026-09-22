@@ -45,6 +45,41 @@ def caput(pv_name: str, value, wait: bool = True, timeout: float = 10.0):
         pass
 
 
+def add_csv_column(path: str, label: str, fill_value) -> str:
+    """Add a new column *label* to an existing CSV, filling every row with *fill_value*.
+
+    Returns an error string on failure, or "" on success.
+    The column is silently skipped if *label* already exists in the file.
+    """
+    import csv, os
+    if not path or not os.path.isfile(path):
+        return "No CSV file found at the given path."
+    try:
+        with open(path, "r", newline="") as f:
+            rows = list(csv.DictReader(f))
+            f.seek(0)
+            existing = csv.DictReader(f).fieldnames or []
+    except Exception as e:
+        return str(e)
+
+    if label in existing:
+        return f"Column '{label}' already exists."
+
+    new_fields = existing + [label]
+    fill_str   = str(fill_value) if fill_value is not None else "0"
+    try:
+        with open(path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=new_fields,
+                               extrasaction="ignore", restval=fill_str)
+            w.writeheader()
+            for row in rows:
+                row[label] = fill_str
+                w.writerow(row)
+    except Exception as e:
+        return str(e)
+    return ""
+
+
 def create_pv_monitor(pv_name: str, callback):
     """Subscribe to a PV via CA monitor.
 
@@ -2824,7 +2859,18 @@ def align_beamline(
                         added.append(col)
 
                 if added:
-                    # Rewrite the file with the extra columns filled as "0"
+                    # Read current live PV values for the newly added columns.
+                    # Falls back to "0" for any PV that is unreachable or unknown.
+                    fill_values = {}
+                    if record_pvs:
+                        for col in added:
+                            pv_name = record_pvs.get(col)
+                            if pv_name:
+                                live = caget(pv_name)
+                                fill_values[col] = str(live) if live is not None else "0"
+                            else:
+                                fill_values[col] = "0"
+
                     try:
                         with open(filename, "r", newline="") as _f:
                             old_rows = list(csv.DictReader(_f))
@@ -2833,10 +2879,14 @@ def align_beamline(
                                                 extrasaction="ignore", restval="0")
                             _w.writeheader()
                             for _r in old_rows:
+                                for col in added:
+                                    _r.setdefault(col, fill_values.get(col, "0"))
                                 _w.writerow(_r)
                         if verbose:
-                            print(f"  ℹ Added column(s) to CSV: {added} "
-                                  f"(existing rows filled with 0)")
+                            for col in added:
+                                fv = fill_values.get(col, "0")
+                                print(f"  ℹ Added column '{col}' to CSV "
+                                      f"(existing rows filled with {fv})")
                     except Exception as _e:
                         if verbose:
                             print(f"  ⚠ Could not migrate CSV columns: {_e}")
