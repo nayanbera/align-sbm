@@ -384,7 +384,8 @@ class _CrystalConfigDialog(QDialog):
 
 class _CrystalStatusWidget(QWidget):
     """Chip showing the current crystal, updated via CA monitor."""
-    _pv_received = pyqtSignal(str)   # CA thread → Qt main thread
+    _pv_received    = pyqtSignal(str)   # CA thread → Qt main thread
+    mappings_changed = pyqtSignal()     # emitted when the user edits crystal mappings
 
     def __init__(self, settings=None, parent=None):
         super().__init__(parent)
@@ -478,6 +479,15 @@ class _CrystalStatusWidget(QWidget):
             "padding: 2px 10px; font-weight: bold;"
         )
 
+    def get_display_names(self) -> list:
+        """Return the list of crystal display names from the current mappings."""
+        return [m.get("label", "") for m in self._mappings if m.get("label", "")]
+
+    def current_display_name(self) -> str:
+        """Return the display name of the currently active crystal, or '' if unknown."""
+        text = self._chip.text()
+        return "" if text == "—" else text
+
     def _configure(self):
         dlg = _CrystalConfigDialog(
             pv_name=self._pv_name,
@@ -489,6 +499,7 @@ class _CrystalStatusWidget(QWidget):
             self._mappings = dlg.get_mappings()
             self.save_settings()
             self._subscribe()
+            self.mappings_changed.emit()
 
     def _load_settings(self):
         import json
@@ -571,6 +582,10 @@ class AlignTab(QWidget):
 
         # Keep energy row list in sync with the energy table
         self._energy_tab.rows_changed.connect(self._refresh_row_list)
+
+        # Sync crystal choices from status widget → energy table dropdowns
+        self._crystal_widget.mappings_changed.connect(self._sync_crystal_choices)
+        self._sync_crystal_choices()  # populate on startup
 
     def _build_ui(self):
         root = QHBoxLayout(self)
@@ -729,6 +744,10 @@ class AlignTab(QWidget):
 
     def _select_no_rows(self):
         self._row_list.clearSelection()
+
+    def _sync_crystal_choices(self):
+        """Push current crystal display names from the status widget to the energy table."""
+        self._energy_tab.set_crystal_choices(self._crystal_widget.get_display_names())
 
     # ── Right: per-motor plot tabs + bottom tab (Results | Log) ─────────────
 
@@ -1348,6 +1367,39 @@ class AlignTab(QWidget):
         ]
         return [all_rows[i] for i in selected_indices if i < len(all_rows)]
 
+    def _check_crystal_mismatch(self):
+        """Warn if selected rows require a crystal different from the current status chip."""
+        current = self._crystal_widget.current_display_name()
+        if not current:
+            return   # crystal PV not configured or disconnected — skip check
+
+        all_crystals = self._energy_tab.get_row_crystals()
+        selected_indices = [
+            self._row_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._row_list.count())
+            if self._row_list.item(i).isSelected()
+        ]
+        mismatches = []
+        for idx in selected_indices:
+            if idx < len(all_crystals):
+                row_crystal = all_crystals[idx]
+                if row_crystal and row_crystal != current:
+                    mismatches.append(row_crystal)
+
+        if not mismatches:
+            return
+
+        unique = sorted(set(mismatches))
+        msg = (
+            f"Crystal mismatch detected:\n\n"
+            f"  Current crystal:   {current}\n"
+            f"  Required crystal:  {', '.join(unique)}\n\n"
+            "Please switch the crystal before starting alignment, "
+            "or clear the Crystal field for the selected rows."
+        )
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.warning(self, "Crystal Mismatch", msg)
+
     def _start_alignment(self):
         rows = self._get_selected_rows()
         if not rows:
@@ -1356,6 +1408,9 @@ class AlignTab(QWidget):
 
         simulate = self._sim_cb.isChecked()
         kwargs   = self._setup_tab.get_kwargs()
+
+        # Crystal mismatch check — warn if any selected row's crystal differs from current
+        self._check_crystal_mismatch()
 
         # Track CSV path for the viewer
         import os

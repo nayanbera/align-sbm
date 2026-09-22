@@ -4,14 +4,21 @@ import io
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QComboBox, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QFileDialog, QMessageBox, QHeaderView,
 )
 
 from .smart_scan_functions import table400
 
-_COLS = ["MonoE (keV)", "Harmonic", "UndE (eV)", "Roll2 (mdeg)", "X2 (μm)", "Updated"]
+_COLS = ["MonoE (keV)", "Harmonic", "UndE (eV)", "Roll2 (mdeg)", "X2 (μm)", "Crystal", "Updated"]
 _KEYS = ["MonoE", "Harmonic", "UndE", "Roll2", "X2"]
+_CRYSTAL_COL = len(_KEYS)       # 5
+_UPDATED_COL  = len(_KEYS) + 1  # 6
+
+
+class _NoScrollComboBox(QComboBox):
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 class EnergyTab(QWidget):
@@ -19,7 +26,8 @@ class EnergyTab(QWidget):
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
-        self._settings = settings
+        self._settings       = settings
+        self._crystal_choices: list = []
         self._build_ui()
         self._load_settings()
 
@@ -32,7 +40,8 @@ class EnergyTab(QWidget):
             "<b>Harmonic</b> (undulator harmonic), "
             "<b>UndE</b> (undulator energy), "
             "<b>Roll2</b> (nominal Roll2 encoder value), "
-            "<b>X2</b> (nominal X2 position)."
+            "<b>X2</b> (nominal X2 position), "
+            "<b>Crystal</b> (crystal for this energy range)."
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -42,7 +51,7 @@ class EnergyTab(QWidget):
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setStretchLastSection(False)
-        for c, width in enumerate([90, 80, 90, 100, 90, 150]):
+        for c, width in enumerate([90, 80, 90, 100, 90, 110, 150]):
             self._table.setColumnWidth(c, width)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSortingEnabled(True)
@@ -72,13 +81,36 @@ class EnergyTab(QWidget):
 
     # ── public API ──────────────────────────────────────────────────────────
 
+    def set_crystal_choices(self, names: list):
+        """Update the dropdown options in every Crystal cell; preserves current selection."""
+        self._crystal_choices = list(names)
+        for r in range(self._table.rowCount()):
+            cb = self._table.cellWidget(r, _CRYSTAL_COL)
+            if cb is None:
+                continue
+            current = cb.currentText()
+            cb.blockSignals(True)
+            cb.clear()
+            cb.addItem("")
+            cb.addItems(self._crystal_choices)
+            cb.setCurrentText(current)
+            cb.blockSignals(False)
+
+    def get_row_crystals(self) -> list:
+        """Return the crystal name selected for each row (empty string if none)."""
+        result = []
+        for r in range(self._table.rowCount()):
+            cb = self._table.cellWidget(r, _CRYSTAL_COL)
+            result.append(cb.currentText() if cb else "")
+        return result
+
     def get_table(self):
         """Return list of [MonoE, Harmonic, UndE, Roll2, X2] rows (floats)."""
         rows = []
         for r in range(self._table.rowCount()):
             try:
                 row = []
-                for c in range(len(_KEYS)):   # only the 5 data columns, skip "Updated"
+                for c in range(len(_KEYS)):   # only the 5 data columns
                     item = self._table.item(r, c)
                     text = item.text().strip() if item else ""
                     row.append(float(text) if text else 0.0)
@@ -96,12 +128,14 @@ class EnergyTab(QWidget):
         return [all_rows[i] for i in selected if i < len(all_rows)]
 
     def get_row_labels(self):
-        """Return list of 'MonoE keV' strings for display in alignment tab."""
+        """Return display strings like '7.112 keV · Si111' for the alignment tab list."""
         labels = []
         for r in range(self._table.rowCount()):
             item = self._table.item(r, 0)
-            val = item.text() if item else "?"
-            labels.append(f"{val} keV")
+            val  = item.text() if item else "?"
+            cb   = self._table.cellWidget(r, _CRYSTAL_COL)
+            crystal = cb.currentText() if cb else ""
+            labels.append(f"{val} keV  ·  {crystal}" if crystal else f"{val} keV")
         return labels
 
     def update_row_after_alignment(self, mono_e: float, roll2: float, x2: float,
@@ -123,13 +157,12 @@ class EnergyTab(QWidget):
                         cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         self._table.setItem(r, col, cell)
                     cell.setText(text)
-                updated_col = len(_KEYS)
-                ts_item = self._table.item(r, updated_col)
+                ts_item = self._table.item(r, _UPDATED_COL)
                 if ts_item is None:
                     ts_item = QTableWidgetItem()
                     ts_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                     ts_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self._table.setItem(r, updated_col, ts_item)
+                    self._table.setItem(r, _UPDATED_COL, ts_item)
                 ts_item.setText(timestamp_str)
                 break
 
@@ -145,8 +178,10 @@ class EnergyTab(QWidget):
                     item = self._table.item(r, c)
                     text = item.text().strip() if item else ""
                     row.append(float(text) if text else 0.0)
-                ts_item = self._table.item(r, len(_KEYS))
+                ts_item = self._table.item(r, _UPDATED_COL)
                 row.append(ts_item.text() if ts_item else "")
+                cb = self._table.cellWidget(r, _CRYSTAL_COL)
+                row.append(cb.currentText() if cb else "")
                 rows.append(row)
             except ValueError:
                 pass
@@ -182,17 +217,30 @@ class EnergyTab(QWidget):
         self._table.insertRow(r)
         defaults = [0.0] * len(_KEYS)
         vals = list(values) if values is not None else defaults
-        # Fill the 5 data columns
+
+        # Data columns (0-4)
         for c, v in enumerate(vals[:len(_KEYS)]):
             item = QTableWidgetItem(str(v))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(r, c, item)
-        # 6th column: "Updated" — read-only, restored from saved value if present
-        ts_text = str(vals[len(_KEYS)]) if len(vals) > len(_KEYS) else ""
+
+        # Crystal column (5) — QComboBox; saved at index 6 in vals
+        # Backwards-compat: old saves had [MonoE..X2, timestamp] (6 elements, no crystal)
+        crystal_name = str(vals[6]) if len(vals) > 6 else ""
+        cb = _NoScrollComboBox()
+        cb.addItem("")
+        cb.addItems(self._crystal_choices)
+        cb.setCurrentText(crystal_name)
+        cb.currentTextChanged.connect(self.rows_changed)
+        self._table.setCellWidget(r, _CRYSTAL_COL, cb)
+
+        # Updated column (6) — read-only; saved at index 5 in vals
+        ts_text = str(vals[5]) if len(vals) > 5 else ""
         updated_item = QTableWidgetItem(ts_text)
         updated_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         updated_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._table.setItem(r, len(_KEYS), updated_item)
+        self._table.setItem(r, _UPDATED_COL, updated_item)
+
         self._table.setSortingEnabled(True)
 
     def _add_row(self):
