@@ -593,10 +593,6 @@ class AlignTab(QWidget):
         # Keep energy row list in sync with the energy table
         self._energy_tab.rows_changed.connect(self._refresh_row_list)
 
-        # Sync crystal choices from status widget → energy table dropdowns
-        self._crystal_widget.mappings_changed.connect(self._sync_crystal_choices)
-        self._sync_crystal_choices()  # populate on startup
-
         # Auto-fill Roll1 + Crystal when a new energy row is added
         self._energy_tab.set_auto_fill_fn(self._energy_auto_fill)
 
@@ -757,10 +753,6 @@ class AlignTab(QWidget):
 
     def _select_no_rows(self):
         self._row_list.clearSelection()
-
-    def _sync_crystal_choices(self):
-        """Push current crystal display names from the status widget to the energy table."""
-        self._energy_tab.set_crystal_choices(self._crystal_widget.get_display_names())
 
     def _energy_auto_fill(self) -> dict:
         """Return current Roll1 RBV and crystal for auto-filling a new energy table row."""

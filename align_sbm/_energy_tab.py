@@ -4,7 +4,7 @@ import io
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QFileDialog, QMessageBox, QHeaderView,
 )
 
@@ -27,19 +27,13 @@ _SAVE_CRYSTAL = 6
 _SAVE_ROLL1   = 7
 
 
-class _NoScrollComboBox(QComboBox):
-    def wheelEvent(self, event):
-        event.ignore()
-
-
 class EnergyTab(QWidget):
     rows_changed = pyqtSignal()   # emitted whenever row count or MonoE values change
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
-        self._settings        = settings
-        self._crystal_choices: list = []
-        self._auto_fill_fn    = None   # callable() → {"crystal": str, "roll1": str}
+        self._settings     = settings
+        self._auto_fill_fn = None   # callable() → {"crystal": str, "roll1": str}
         self._build_ui()
         self._load_settings()
 
@@ -98,27 +92,12 @@ class EnergyTab(QWidget):
         """Set a callable invoked when Add Row is clicked: fn() → {"crystal": str, "roll1": str}."""
         self._auto_fill_fn = fn
 
-    def set_crystal_choices(self, names: list):
-        """Update the dropdown options in every Crystal cell; preserves current selection."""
-        self._crystal_choices = list(names)
-        for r in range(self._table.rowCount()):
-            cb = self._table.cellWidget(r, _CRYSTAL_COL)
-            if cb is None:
-                continue
-            current = cb.currentText()
-            cb.blockSignals(True)
-            cb.clear()
-            cb.addItem("")
-            cb.addItems(self._crystal_choices)
-            cb.setCurrentText(current)
-            cb.blockSignals(False)
-
     def get_row_crystals(self) -> list:
-        """Return the crystal name selected for each row (empty string if none)."""
+        """Return the crystal name for each row (empty string if none)."""
         result = []
         for r in range(self._table.rowCount()):
-            cb = self._table.cellWidget(r, _CRYSTAL_COL)
-            result.append(cb.currentText() if cb else "")
+            item = self._table.item(r, _CRYSTAL_COL)
+            result.append(item.text().strip() if item else "")
         return result
 
     def get_table(self):
@@ -154,10 +133,10 @@ class EnergyTab(QWidget):
         """Return display strings for the alignment tab list, including crystal if set."""
         labels = []
         for r in range(self._table.rowCount()):
-            item = self._table.item(r, 0)
-            val  = item.text() if item else "?"
-            cb   = self._table.cellWidget(r, _CRYSTAL_COL)
-            crystal = cb.currentText() if cb else ""
+            item    = self._table.item(r, 0)
+            val     = item.text() if item else "?"
+            cr_item = self._table.item(r, _CRYSTAL_COL)
+            crystal = cr_item.text().strip() if cr_item else ""
             labels.append(f"{val} keV  ·  {crystal}" if crystal else f"{val} keV")
         return labels
 
@@ -205,8 +184,8 @@ class EnergyTab(QWidget):
                 ts_item = self._table.item(r, _UPDATED_COL)
                 row.append(ts_item.text() if ts_item else "")
                 # index 6: crystal
-                cb = self._table.cellWidget(r, _CRYSTAL_COL)
-                row.append(cb.currentText() if cb else "")
+                cr_item = self._table.item(r, _CRYSTAL_COL)
+                row.append(cr_item.text().strip() if cr_item else "")
                 # index 7: roll1
                 roll1_item = self._table.item(r, _ROLL1_COL)
                 row.append(roll1_item.text() if roll1_item else "")
@@ -266,14 +245,11 @@ class EnergyTab(QWidget):
         roll1_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(r, _ROLL1_COL, roll1_item)
 
-        # Crystal column (6) — dropdown
+        # Crystal column (6) — plain editable text
         crystal_name = str(vals[_SAVE_CRYSTAL]) if len(vals) > _SAVE_CRYSTAL else ""
-        cb = _NoScrollComboBox()
-        cb.addItem("")
-        cb.addItems(self._crystal_choices)
-        cb.setCurrentText(crystal_name)
-        cb.currentTextChanged.connect(self.rows_changed)
-        self._table.setCellWidget(r, _CRYSTAL_COL, cb)
+        cr_item = QTableWidgetItem(crystal_name)
+        cr_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._table.setItem(r, _CRYSTAL_COL, cr_item)
 
         # Updated column (7) — read-only timestamp
         ts_text = str(vals[_SAVE_TS]) if len(vals) > _SAVE_TS else ""
