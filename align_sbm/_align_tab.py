@@ -707,12 +707,21 @@ class AlignTab(QWidget):
         return panel
 
     def _refresh_row_list(self):
+        # Preserve current selection by label so edits don't reset it.
+        selected = {self._row_list.item(i).text()
+                    for i in range(self._row_list.count())
+                    if self._row_list.item(i).isSelected()}
         self._row_list.clear()
         for i, label in enumerate(self._energy_tab.get_row_labels()):
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, i)
             self._row_list.addItem(item)
-        self._select_all_rows()
+        if selected:
+            for i in range(self._row_list.count()):
+                self._row_list.item(i).setSelected(
+                    self._row_list.item(i).text() in selected)
+        else:
+            self._select_all_rows()
 
     def _select_all_rows(self):
         for i in range(self._row_list.count()):
