@@ -1540,11 +1540,12 @@ class AlignTab(QWidget):
         self._results_table.scrollToBottom()
         self._refresh_csv()
 
-        # Update Roll2 and X2 in the energy table
+        # Update Roll2 and X2 in the energy table — skip entirely in simulation mode.
         mono_e = record.get("MonoE")
         roll2  = record.get("Roll2")
         x2     = record.get("X2")
-        if mono_e is not None and roll2 is not None and x2 is not None:
+        if (not self._loop_simulate
+                and mono_e is not None and roll2 is not None and x2 is not None):
             from datetime import datetime
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self._energy_tab.update_row_after_alignment(float(mono_e), float(roll2), float(x2), ts)
