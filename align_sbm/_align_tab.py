@@ -280,6 +280,233 @@ class _ColorRuleDialog(QDialog):
         return rules
 
 
+class _CrystalConfigDialog(QDialog):
+    """Configure the crystal-status PV name and value → label/color mappings."""
+    _PALETTE = ["#1565c0", "#2e7d32", "#e65100", "#6a1b9a", "#00838f", "#ad1457"]
+
+    def __init__(self, pv_name, mappings, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Crystal Status Configuration")
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(300)
+
+        vbox = QVBoxLayout(self)
+        from PyQt6.QtWidgets import QFormLayout
+        form = QFormLayout()
+        self._pv_edit = QLineEdit(pv_name)
+        self._pv_edit.setPlaceholderText("e.g. ID15:DCM:crystal")
+        form.addRow("PV name:", self._pv_edit)
+        vbox.addLayout(form)
+
+        vbox.addWidget(QLabel("Value → Crystal mappings:"))
+        self._table = QTableWidget(0, 3)
+        self._table.setHorizontalHeaderLabels(["PV value", "Display name", "Color"])
+        hdr = self._table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        vbox.addWidget(self._table)
+
+        for m in mappings:
+            self._add_row(m)
+
+        row_btns = QHBoxLayout()
+        add_btn = QPushButton("+ Add")
+        add_btn.clicked.connect(lambda: self._add_row({}))
+        rm_btn = QPushButton("Remove")
+        rm_btn.clicked.connect(self._remove_selected)
+        row_btns.addWidget(add_btn)
+        row_btns.addWidget(rm_btn)
+        row_btns.addStretch()
+        vbox.addLayout(row_btns)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        vbox.addWidget(btns)
+
+    def _add_row(self, mapping=None):
+        if mapping is None:
+            mapping = {}
+        r = self._table.rowCount()
+        self._table.insertRow(r)
+        self._table.setCellWidget(r, 0, QLineEdit(str(mapping.get("raw", ""))))
+        self._table.setCellWidget(r, 1, QLineEdit(str(mapping.get("label", ""))))
+        color_hex = mapping.get("color", self._PALETTE[r % len(self._PALETTE)])
+        color_btn = QPushButton()
+        color_btn.setToolTip("Click to choose a color")
+        _ColorRuleDialog._set_color_btn(color_btn, color_hex)
+        color_btn.clicked.connect(self._pick_color)
+        self._table.setCellWidget(r, 2, color_btn)
+
+    def _pick_color(self):
+        from PyQt6.QtWidgets import QColorDialog
+        from PyQt6.QtGui import QColor
+        btn = self.sender()
+        c = QColorDialog.getColor(QColor(btn.property("color_hex") or "#1565c0"), self)
+        if c.isValid():
+            _ColorRuleDialog._set_color_btn(btn, c.name())
+
+    def _remove_selected(self):
+        row = self._table.currentRow()
+        if row >= 0:
+            self._table.removeRow(row)
+
+    def get_pv_name(self):
+        return self._pv_edit.text().strip()
+
+    def get_mappings(self):
+        result = []
+        for r in range(self._table.rowCount()):
+            raw_w   = self._table.cellWidget(r, 0)
+            label_w = self._table.cellWidget(r, 1)
+            color_w = self._table.cellWidget(r, 2)
+            if not (raw_w and label_w and color_w):
+                continue
+            result.append({
+                "raw":   raw_w.text().strip(),
+                "label": label_w.text().strip(),
+                "color": color_w.property("color_hex") or "#1565c0",
+            })
+        return result
+
+
+class _CrystalStatusWidget(QWidget):
+    """Chip showing the current crystal, updated via CA monitor."""
+    _pv_received = pyqtSignal(str)   # CA thread → Qt main thread
+
+    def __init__(self, settings=None, parent=None):
+        super().__init__(parent)
+        self._settings = settings
+        self._pv_name  = ""
+        self._mappings = []
+        self._pv_obj   = None
+
+        self._build_ui()
+        self._pv_received.connect(self._update_chip)
+        self._load_settings()
+
+    def _build_ui(self):
+        hbox = QHBoxLayout(self)
+        hbox.setContentsMargins(0, 2, 0, 2)
+        hbox.setSpacing(6)
+        hbox.addWidget(QLabel("Crystal:"))
+        self._chip = QLabel("—")
+        self._chip.setMinimumWidth(80)
+        self._chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._chip.setStyleSheet(
+            "background-color: #555; color: #fff; border-radius: 4px; "
+            "padding: 2px 10px; font-weight: bold;"
+        )
+        hbox.addWidget(self._chip)
+        cfg_btn = QPushButton("⚙")
+        cfg_btn.setMaximumWidth(28)
+        cfg_btn.setToolTip("Configure crystal status PV and value mappings")
+        cfg_btn.clicked.connect(self._configure)
+        hbox.addWidget(cfg_btn)
+        hbox.addStretch()
+
+    def _subscribe(self):
+        self._unsubscribe()
+        if not self._pv_name:
+            return
+        try:
+            from epics import PV
+            self._pv_obj = PV(
+                self._pv_name,
+                callback=self._on_ca_value,
+                connection_callback=self._on_ca_connect,
+                auto_monitor=True,
+            )
+        except Exception:
+            pass
+
+    def _unsubscribe(self):
+        if self._pv_obj is not None:
+            try:
+                self._pv_obj.disconnect()
+            except Exception:
+                pass
+            self._pv_obj = None
+
+    def _on_ca_value(self, pvname=None, value=None, char_value=None, **kw):
+        """Called from CA thread — emit signal to update UI in Qt main thread."""
+        val = str(char_value).strip() if char_value is not None else str(value)
+        self._pv_received.emit(val)
+
+    def _on_ca_connect(self, pvname=None, conn=False, **kw):
+        if not conn:
+            self._pv_received.emit("")
+
+    def _update_chip(self, raw_value):
+        from PyQt6.QtGui import QColor
+        if not raw_value:
+            self._chip.setText("—")
+            self._chip.setStyleSheet(
+                "background-color: #555; color: #fff; border-radius: 4px; "
+                "padding: 2px 10px; font-weight: bold;"
+            )
+            return
+        for m in self._mappings:
+            if m.get("raw", "").strip() == raw_value:
+                label = m.get("label") or raw_value
+                color = m.get("color", "#1565c0")
+                c     = QColor(color)
+                lum   = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+                fg    = "#000000" if lum > 128 else "#ffffff"
+                self._chip.setText(label)
+                self._chip.setStyleSheet(
+                    f"background-color: {color}; color: {fg}; border-radius: 4px; "
+                    "padding: 2px 10px; font-weight: bold;"
+                )
+                return
+        # No mapping matched — show raw value in a neutral chip
+        self._chip.setText(raw_value)
+        self._chip.setStyleSheet(
+            "background-color: #37474f; color: #fff; border-radius: 4px; "
+            "padding: 2px 10px; font-weight: bold;"
+        )
+
+    def _configure(self):
+        dlg = _CrystalConfigDialog(
+            pv_name=self._pv_name,
+            mappings=list(self._mappings),
+            parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._pv_name  = dlg.get_pv_name()
+            self._mappings = dlg.get_mappings()
+            self.save_settings()
+            self._subscribe()
+
+    def _load_settings(self):
+        import json
+        if not self._settings:
+            self._subscribe()
+            return
+        self._pv_name = self._settings.value("crystal_pv_name", "")
+        raw = self._settings.value("crystal_mappings", "[]")
+        try:
+            self._mappings = json.loads(raw) if isinstance(raw, str) else []
+        except Exception:
+            self._mappings = []
+        self._subscribe()
+
+    def save_settings(self):
+        import json
+        if not self._settings:
+            return
+        self._settings.setValue("crystal_pv_name", self._pv_name)
+        self._settings.setValue("crystal_mappings", json.dumps(self._mappings))
+
+    def reload_settings(self):
+        self._load_settings()
+
+
 class AlignTab(QWidget):
     status_message = pyqtSignal(str)
 
@@ -360,6 +587,9 @@ class AlignTab(QWidget):
         )
         mv.addWidget(self._sim_cb)
         vbox.addWidget(mode_grp)
+
+        self._crystal_widget = _CrystalStatusWidget(settings=self._settings, parent=self)
+        vbox.addWidget(self._crystal_widget)
 
         energy_grp = QGroupBox("Energy rows to align")
         ev = QVBoxLayout(energy_grp)
@@ -1621,8 +1851,10 @@ class AlignTab(QWidget):
 
     def reload_settings(self):
         self._hold_widget.reload_settings()
+        self._crystal_widget.reload_settings()
         self._restore_color_settings()
 
     def save_settings(self):
         self._hold_widget.save_settings()
+        self._crystal_widget.save_settings()
         self._save_color_settings()
