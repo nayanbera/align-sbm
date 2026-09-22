@@ -1379,38 +1379,46 @@ class AlignTab(QWidget):
         ]
         return [all_rows[i] for i in selected_indices if i < len(all_rows)]
 
-    def _check_crystal_mismatch(self):
-        """Warn if selected rows require a crystal different from the current status chip."""
+    def _crystal_mismatch_for_indices(self, indices: list) -> list:
+        """Return list of (row_index, required_crystal) for rows whose crystal != current."""
         current = self._crystal_widget.current_display_name()
         if not current:
-            return   # crystal PV not configured or disconnected — skip check
-
+            return []   # crystal PV not configured/connected — skip check
         all_crystals = self._energy_tab.get_row_crystals()
+        mismatches = []
+        for idx in indices:
+            if idx < len(all_crystals):
+                row_crystal = all_crystals[idx].strip()
+                if row_crystal and row_crystal != current:
+                    mismatches.append((idx, row_crystal))
+        return mismatches
+
+    def _check_crystal_mismatch(self) -> bool:
+        """Block Start Alignment if any selected row's crystal differs from the current crystal.
+
+        Returns True if the caller should abort, False if safe to proceed.
+        """
         selected_indices = [
             self._row_list.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(self._row_list.count())
             if self._row_list.item(i).isSelected()
         ]
-        mismatches = []
-        for idx in selected_indices:
-            if idx < len(all_crystals):
-                row_crystal = all_crystals[idx]
-                if row_crystal and row_crystal != current:
-                    mismatches.append(row_crystal)
-
+        mismatches = self._crystal_mismatch_for_indices(selected_indices)
         if not mismatches:
-            return
+            return False
 
-        unique = sorted(set(mismatches))
-        msg = (
-            f"Crystal mismatch detected:\n\n"
+        current = self._crystal_widget.current_display_name()
+        unique  = sorted({c for _, c in mismatches})
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(
+            self, "Crystal Mismatch — Alignment Blocked",
+            f"Cannot start alignment.\n\n"
             f"  Current crystal:   {current}\n"
             f"  Required crystal:  {', '.join(unique)}\n\n"
-            "Please switch the crystal before starting alignment, "
-            "or clear the Crystal field for the selected rows."
+            "Switch to the correct crystal before starting, "
+            "or clear the Crystal field for the conflicting rows."
         )
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.warning(self, "Crystal Mismatch", msg)
+        return True
 
     def _start_alignment(self):
         rows = self._get_selected_rows()
@@ -1421,8 +1429,9 @@ class AlignTab(QWidget):
         simulate = self._sim_cb.isChecked()
         kwargs   = self._setup_tab.get_kwargs()
 
-        # Crystal mismatch check — warn if any selected row's crystal differs from current
-        self._check_crystal_mismatch()
+        # Block if any selected row's crystal doesn't match the current crystal
+        if self._check_crystal_mismatch():
+            return
 
         # Track CSV path for the viewer
         import os
@@ -1551,6 +1560,23 @@ class AlignTab(QWidget):
             return
 
         idx = selected[0].data(Qt.ItemDataRole.UserRole)
+
+        # Block if the selected row's crystal doesn't match the current crystal
+        mismatches = self._crystal_mismatch_for_indices([idx])
+        if mismatches:
+            current = self._crystal_widget.current_display_name()
+            required = mismatches[0][1]
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self, "Crystal Mismatch — Move Blocked",
+                f"Cannot move to this energy.\n\n"
+                f"  Current crystal:   {current}\n"
+                f"  Required crystal:  {required}\n\n"
+                "Switch to the correct crystal before moving, "
+                "or clear the Crystal field for this row."
+            )
+            return
+
         all_rows = self._energy_tab.get_table()
         if idx >= len(all_rows):
             self._log.appendPlainText("[MoveToEnergy] Selected row index out of range.")
