@@ -401,7 +401,7 @@ class _CrystalStatusWidget(QWidget):
         hbox = QHBoxLayout(self)
         hbox.setContentsMargins(0, 2, 0, 2)
         hbox.setSpacing(6)
-        hbox.addWidget(QLabel("Crystal:"))
+        hbox.addWidget(QLabel("Current Crystal:"))
         self._chip = QLabel("—")
         self._chip.setMinimumWidth(80)
         self._chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
