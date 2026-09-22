@@ -8,7 +8,8 @@ from PyQt6.QtWidgets import (
     QGroupBox, QCheckBox, QPushButton, QLabel, QLineEdit,
     QProgressBar, QPlainTextEdit, QListWidget, QListWidgetItem,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QFileDialog, QMessageBox,
+    QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox,
+    QAbstractItemView,
 )
 from .smart_scan_functions import ScanStatus
 from ._hold_widget import HoldConditionsWidget
@@ -156,6 +157,129 @@ def _fmt(v, decimals=6):
         return "—"
 
 
+class _ColorRuleDialog(QDialog):
+    """Dialog for editing CSV row color-coding rules."""
+    _OPS = [">", "<", ">=", "<=", "=", "!=", "in range", "out of range"]
+
+    def __init__(self, rules, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Color Coding Rules")
+        self.setMinimumWidth(580)
+        self.setMinimumHeight(300)
+
+        vbox = QVBoxLayout(self)
+
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(["Operator", "Value", "Value 2", "Color", ""])
+        hdr = self._table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(4, 32)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        vbox.addWidget(self._table)
+
+        for rule in rules:
+            self._add_row(rule)
+
+        add_btn = QPushButton("+ Add Rule")
+        add_btn.clicked.connect(lambda: self._add_row({}))
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        hbox = QHBoxLayout()
+        hbox.addWidget(add_btn)
+        hbox.addStretch()
+        hbox.addWidget(btns)
+        vbox.addLayout(hbox)
+
+    def _add_row(self, rule=None):
+        from PyQt6.QtGui import QColor
+        if rule is None:
+            rule = {}
+        r = self._table.rowCount()
+        self._table.insertRow(r)
+
+        op_combo = QComboBox()
+        op_combo.addItems(self._OPS)
+        op = rule.get("op", ">")
+        idx = op_combo.findText(op)
+        if idx >= 0:
+            op_combo.setCurrentIndex(idx)
+        self._table.setCellWidget(r, 0, op_combo)
+
+        val_edit = QLineEdit(str(rule.get("value", "")))
+        self._table.setCellWidget(r, 1, val_edit)
+
+        val2_edit = QLineEdit(str(rule.get("value2", "") or ""))
+        val2_edit.setEnabled(op in ("in range", "out of range"))
+        self._table.setCellWidget(r, 2, val2_edit)
+
+        def _on_op(text, v2=val2_edit):
+            v2.setEnabled(text in ("in range", "out of range"))
+        op_combo.currentTextChanged.connect(_on_op)
+
+        color_hex = rule.get("color", "#4caf50")
+        color_btn = QPushButton()
+        color_btn.setToolTip("Click to choose a color")
+        self._set_color_btn(color_btn, color_hex)
+        color_btn.clicked.connect(self._pick_color)
+        self._table.setCellWidget(r, 3, color_btn)
+
+        rm_btn = QPushButton("✕")
+        rm_btn.setMaximumWidth(32)
+        rm_btn.clicked.connect(self._remove_row)
+        self._table.setCellWidget(r, 4, rm_btn)
+
+    @staticmethod
+    def _set_color_btn(btn, hex_color):
+        from PyQt6.QtGui import QColor
+        btn.setProperty("color_hex", hex_color)
+        c = QColor(hex_color)
+        lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+        fg = "#000000" if lum > 128 else "#ffffff"
+        btn.setStyleSheet(f"background-color: {hex_color}; color: {fg}; border-radius: 3px;")
+        btn.setText(hex_color)
+
+    def _pick_color(self):
+        from PyQt6.QtWidgets import QColorDialog
+        from PyQt6.QtGui import QColor
+        btn = self.sender()
+        current = btn.property("color_hex") or "#4caf50"
+        c = QColorDialog.getColor(QColor(current), self)
+        if c.isValid():
+            self._set_color_btn(btn, c.name())
+
+    def _remove_row(self):
+        btn = self.sender()
+        for r in range(self._table.rowCount()):
+            if self._table.cellWidget(r, 4) is btn:
+                self._table.removeRow(r)
+                return
+
+    def get_rules(self):
+        rules = []
+        for r in range(self._table.rowCount()):
+            op_w   = self._table.cellWidget(r, 0)
+            val_w  = self._table.cellWidget(r, 1)
+            val2_w = self._table.cellWidget(r, 2)
+            col_w  = self._table.cellWidget(r, 3)
+            if not (op_w and val_w and col_w):
+                continue
+            rules.append({
+                "op":     op_w.currentText(),
+                "value":  val_w.text().strip(),
+                "value2": val2_w.text().strip() if val2_w else "",
+                "color":  col_w.property("color_hex") or "#4caf50",
+            })
+        return rules
+
+
 class AlignTab(QWidget):
     status_message = pyqtSignal(str)
 
@@ -191,6 +315,8 @@ class AlignTab(QWidget):
 
         # CSV viewer state
         self._csv_path: str = ""
+        self._color_col: str = ""
+        self._color_rules: list = []
 
         # Loop state
         self._loop_active          = False
@@ -204,6 +330,7 @@ class AlignTab(QWidget):
 
         self._build_ui()
         self._restore_last_csv()
+        self._restore_color_settings()
 
         # Push setup-tab changes to the running worker between rows
         self._setup_tab.config_changed.connect(self._on_setup_changed)
@@ -515,6 +642,28 @@ class AlignTab(QWidget):
         csv_hdr.addWidget(analyze_btn)
         cv.addLayout(csv_hdr)
 
+        # Color coding row
+        color_hdr = QHBoxLayout()
+        color_hdr.addWidget(QLabel("Color by:"))
+        self._color_col_combo = QComboBox()
+        self._color_col_combo.setMinimumWidth(120)
+        self._color_col_combo.setToolTip("Select a column whose values drive row color coding")
+        self._color_col_combo.currentTextChanged.connect(self._on_color_col_changed)
+        color_hdr.addWidget(self._color_col_combo)
+        edit_rules_btn = QPushButton("Edit Rules…")
+        edit_rules_btn.setToolTip("Define conditions and colors for row highlighting")
+        edit_rules_btn.clicked.connect(self._edit_color_rules)
+        color_hdr.addWidget(edit_rules_btn)
+        clear_color_btn = QPushButton("Clear Coloring")
+        clear_color_btn.clicked.connect(self._clear_coloring)
+        color_hdr.addWidget(clear_color_btn)
+        # Legend: colored chips for active rules
+        self._color_legend_layout = QHBoxLayout()
+        self._color_legend_layout.setContentsMargins(8, 0, 0, 0)
+        self._color_legend_layout.setSpacing(4)
+        color_hdr.addLayout(self._color_legend_layout, 1)
+        cv.addLayout(color_hdr)
+
         self._csv_table = QTableWidget(0, 0)
         self._csv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._csv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -639,6 +788,19 @@ class AlignTab(QWidget):
         self._csv_table.scrollToBottom()
         self._csv_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
+
+        # Update color-by combobox, preserving the current selection if still valid
+        if hasattr(self, '_color_col_combo'):
+            prev = self._color_col_combo.currentText()
+            self._color_col_combo.blockSignals(True)
+            self._color_col_combo.clear()
+            self._color_col_combo.addItem("")
+            self._color_col_combo.addItems(headers)
+            idx = self._color_col_combo.findText(prev)
+            self._color_col_combo.setCurrentIndex(max(0, idx))
+            self._color_col_combo.blockSignals(False)
+            self._apply_csv_coloring()
+            self._update_color_legend()
 
     def _delete_csv_rows(self):
         """Permanently remove selected rows from the CSV file."""
@@ -771,6 +933,158 @@ class AlignTab(QWidget):
             f"Column '{label}' added.\n"
             f"All {self._csv_table.rowCount()} existing rows filled with {fill_value}."
         )
+
+    # ── CSV color coding ─────────────────────────────────────────────────────
+
+    def _on_color_col_changed(self, col):
+        self._color_col = col
+        self._apply_csv_coloring()
+        self._save_color_settings()
+
+    def _apply_csv_coloring(self):
+        from PyQt6.QtGui import QBrush, QColor
+        # Clear all row backgrounds
+        for r in range(self._csv_table.rowCount()):
+            for c in range(self._csv_table.columnCount()):
+                item = self._csv_table.item(r, c)
+                if item:
+                    item.setBackground(QBrush())
+
+        col = self._color_col_combo.currentText() if hasattr(self, '_color_col_combo') else ""
+        if not col or not self._color_rules:
+            return
+
+        col_idx = next(
+            (c for c in range(self._csv_table.columnCount())
+             if self._csv_table.horizontalHeaderItem(c) and
+                self._csv_table.horizontalHeaderItem(c).text() == col),
+            -1,
+        )
+        if col_idx < 0:
+            return
+
+        for r in range(self._csv_table.rowCount()):
+            val_item = self._csv_table.item(r, col_idx)
+            val_str  = val_item.text() if val_item else ""
+            for rule in self._color_rules:
+                if self._eval_rule(val_str, rule):
+                    brush = QBrush(QColor(rule.get("color", "#ffffff")))
+                    for c in range(self._csv_table.columnCount()):
+                        item = self._csv_table.item(r, c)
+                        if item:
+                            item.setBackground(brush)
+                    break
+
+    @staticmethod
+    def _eval_rule(val_str, rule):
+        try:
+            v = float(val_str)
+        except (TypeError, ValueError):
+            return False
+        op = rule.get("op", ">")
+        try:
+            t = float(rule.get("value", 0))
+        except (TypeError, ValueError):
+            return False
+        if op in ("in range", "out of range"):
+            try:
+                t2 = float(rule.get("value2", 0))
+            except (TypeError, ValueError):
+                return False
+            return (t <= v <= t2) if op == "in range" else (v < t or v > t2)
+        if op == ">":  return v > t
+        if op == "<":  return v < t
+        if op == ">=": return v >= t
+        if op == "<=": return v <= t
+        if op == "=":  return v == t
+        if op == "!=": return v != t
+        return False
+
+    def _update_color_legend(self):
+        from PyQt6.QtGui import QColor
+        while self._color_legend_layout.count():
+            item = self._color_legend_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        col = self._color_col_combo.currentText() if hasattr(self, '_color_col_combo') else ""
+        if not col or not self._color_rules:
+            return
+
+        _OP_SYMS = {
+            ">": ">", "<": "<", ">=": "≥", "<=": "≤",
+            "=": "=", "!=": "≠",
+            "in range": "in", "out of range": "out",
+        }
+        for rule in self._color_rules:
+            op        = rule.get("op", ">")
+            val       = rule.get("value", "")
+            val2      = rule.get("value2", "")
+            hex_color = rule.get("color", "#ffffff")
+            sym       = _OP_SYMS.get(op, op)
+            text      = f"{val} {sym} {val2}" if op in ("in range", "out of range") else f"{sym} {val}"
+            c         = QColor(hex_color)
+            lum       = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+            fg        = "#000000" if lum > 128 else "#ffffff"
+            chip = QLabel(f"  {text}  ")
+            chip.setStyleSheet(
+                f"background-color: {hex_color}; color: {fg}; "
+                "border-radius: 3px; padding: 1px 4px; font-size: 10px;"
+            )
+            chip.setToolTip(f"value {op} {val}" + (f" .. {val2}" if val2 else ""))
+            self._color_legend_layout.addWidget(chip)
+
+        self._color_legend_layout.addStretch()
+
+    def _clear_coloring(self):
+        if hasattr(self, '_color_col_combo'):
+            self._color_col_combo.blockSignals(True)
+            self._color_col_combo.setCurrentIndex(0)
+            self._color_col_combo.blockSignals(False)
+        self._color_col   = ""
+        self._color_rules = []
+        self._apply_csv_coloring()
+        self._update_color_legend()
+        self._save_color_settings()
+
+    def _edit_color_rules(self):
+        col = self._color_col_combo.currentText() if hasattr(self, '_color_col_combo') else ""
+        if not col:
+            QMessageBox.information(self, "Edit Rules",
+                                    "Please select a 'Color by' column first.")
+            return
+        dlg = _ColorRuleDialog(rules=list(self._color_rules), parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._color_rules = dlg.get_rules()
+            self._apply_csv_coloring()
+            self._update_color_legend()
+            self._save_color_settings()
+
+    def _save_color_settings(self):
+        import json
+        if not self._settings:
+            return
+        self._settings.setValue("csv_color_col", self._color_col)
+        self._settings.setValue("csv_color_rules", json.dumps(self._color_rules))
+
+    def _restore_color_settings(self):
+        import json
+        if not self._settings:
+            return
+        self._color_col  = self._settings.value("csv_color_col", "")
+        rules_raw        = self._settings.value("csv_color_rules", "[]")
+        try:
+            self._color_rules = json.loads(rules_raw) if isinstance(rules_raw, str) else []
+        except Exception:
+            self._color_rules = []
+        if hasattr(self, '_color_col_combo') and self._color_col:
+            idx = self._color_col_combo.findText(self._color_col)
+            if idx >= 0:
+                self._color_col_combo.blockSignals(True)
+                self._color_col_combo.setCurrentIndex(idx)
+                self._color_col_combo.blockSignals(False)
+        self._apply_csv_coloring()
+        self._update_color_legend()
 
     # ── Alignment control ────────────────────────────────────────────────────
 
@@ -1307,6 +1621,8 @@ class AlignTab(QWidget):
 
     def reload_settings(self):
         self._hold_widget.reload_settings()
+        self._restore_color_settings()
 
     def save_settings(self):
         self._hold_widget.save_settings()
+        self._save_color_settings()
