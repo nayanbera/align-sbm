@@ -2244,6 +2244,7 @@ _COL_HARMONIC  = 1
 _COL_UND_E     = 2
 _COL_ROLL2     = 3
 _COL_X2        = 4
+_COL_ROLL1     = 5
 
 table400 = [
     [10.0,   1,         10.03,   3.7e6,   -1393],
@@ -2269,12 +2270,21 @@ def get_energy_row(mono_e: float, table: list = None, tol: float = 0.5) -> dict:
         available = [row[_COL_MONO_E] for row in table]
         raise ValueError(f"No entry within {tol} keV of {mono_e} keV. Available: {available}")
     row = table[best_idx]
+    roll1 = None
+    if len(row) > _COL_ROLL1:
+        try:
+            v = row[_COL_ROLL1]
+            if v is not None:
+                roll1 = float(v)
+        except (TypeError, ValueError):
+            pass
     return {
         "mono_e"   : row[_COL_MONO_E],
         "harmonic" : int(row[_COL_HARMONIC]),
         "und_e"    : row[_COL_UND_E],
         "roll2"    : row[_COL_ROLL2],
         "x2"       : row[_COL_X2],
+        "roll1"    : roll1,
         "row_index": best_idx,
     }
 
@@ -2338,6 +2348,7 @@ def set_energy(mono_e, table=None, tol=0.5,
                mono_e_pv="ID15A2:mono:Energy", harmonic_pv="ID15A2:und:Harmonic",
                und_e_pv="ID15A2:und:Energy", und_start_pv="ID15A2:und:Start",
                roll2_pv="ID15A2:mono:Roll2", x2_pv="ID15A2:mono:X2",
+               roll1_motor=None,
                wait=True, settle=1.0, simulate=False, verbose=True, debug=False,
                pre_energy_pvs=None, post_energy_pvs=None) -> dict:
     """
@@ -2354,6 +2365,8 @@ def set_energy(mono_e, table=None, tol=0.5,
         print(f"  UndE     : {row['und_e']} keV")
         print(f"  Roll2    : {row['roll2']:.4g}")
         print(f"  X2       : {row['x2']}")
+        if row.get("roll1") is not None and roll1_motor:
+            print(f"  Roll1    : {row['roll1']:.4g}")
     def _lbl(p): return _safe_label(p)
     def _apply_extra_pvs(pvlist, label):
         """Write (pvname, value[, wait_pv, wait_value]) tuples.
@@ -2390,6 +2403,8 @@ def set_energy(mono_e, table=None, tol=0.5,
             print(f"    caput {_lbl(harmonic_pv)} {row['harmonic']}")
             print(f"    caput {_lbl(und_e_pv)} {row['und_e']}")
             print(f"    caput {_lbl(und_start_pv)} 1")
+            if roll1_motor and row.get("roll1") is not None:
+                print(f"    Motor.move {_lbl(roll1_motor)} {row['roll1']}")
             print(f"    Motor.move {_lbl(roll2_pv)} {row['roll2']}")
             print(f"    Motor.move {_lbl(x2_pv)} {row['x2']}")
             print(f"    Motor.move {_lbl(mono_e_pv)} {row['mono_e']}")
@@ -2397,6 +2412,8 @@ def set_energy(mono_e, table=None, tol=0.5,
         _pv_put(harmonic_pv, row["harmonic"], "Harmonic", wait, verbose)
         _pv_put(und_e_pv, row["und_e"], "UndE", wait, verbose)
         _pv_put(und_start_pv, 1, "UndStart", wait=False, verbose=verbose)
+        if roll1_motor and row.get("roll1") is not None:
+            _motor_move(roll1_motor, row["roll1"], "Roll1", wait, verbose)
         _motor_move(roll2_pv, row["roll2"], "Roll2", wait, verbose)
         _motor_move(x2_pv,    row["x2"],   "X2",    wait, verbose)
         if isinstance(mono_e_pv, str):
@@ -2490,12 +2507,20 @@ def set_energy_interpolated(mono_e, table=None, method="pchip", extrapolate=Fals
                             mono_e_pv="ID15A2:mono:Energy", harmonic_pv="ID15A2:und:Harmonic",
                             und_e_pv="ID15A2:und:Energy", und_start_pv="ID15A2:und:Start",
                             roll2_pv="ID15A2:mono:Roll2", x2_pv="ID15A2:mono:X2",
+                            roll1_motor=None,
                             wait=True, settle=1.0, simulate=False, verbose=True, debug=False,
                             pre_energy_pvs=None, post_energy_pvs=None) -> dict:
     if debug:
         verbose = False
     row = interpolate_energy(mono_e, table=table, method=method,
                              extrapolate=extrapolate, verbose=verbose)
+    # Roll1 is not interpolated — use the nearest table row's value
+    roll1_val = None
+    if roll1_motor and table is not None:
+        try:
+            roll1_val = get_energy_row(mono_e, table=table).get("roll1")
+        except Exception:
+            pass
     def _lbl(p): return _safe_label(p)
 
     def _apply_extra_pvs(pvlist, label):
@@ -2529,6 +2554,8 @@ def set_energy_interpolated(mono_e, table=None, method="pchip", extrapolate=Fals
             print(f"    caput {_lbl(harmonic_pv)} {row['harmonic']}")
             print(f"    caput {_lbl(und_e_pv)} {row['und_e']:.6g}")
             print(f"    caput {_lbl(und_start_pv)} 1")
+            if roll1_motor and roll1_val is not None:
+                print(f"    Motor.move {_lbl(roll1_motor)} {roll1_val:.6g}")
             print(f"    Motor.move {_lbl(roll2_pv)} {row['roll2']:.6g}")
             print(f"    Motor.move {_lbl(x2_pv)} {row['x2']:.6g}")
             print(f"    Motor.move {_lbl(mono_e_pv)} {row['mono_e']:.6g}")
@@ -2536,6 +2563,8 @@ def set_energy_interpolated(mono_e, table=None, method="pchip", extrapolate=Fals
         _pv_put(harmonic_pv,  row["harmonic"], "Harmonic", wait, verbose)
         _pv_put(und_e_pv,     row["und_e"],    "UndE",     wait, verbose)
         _pv_put(und_start_pv, 1,               "UndStart", False, verbose)
+        if roll1_motor and roll1_val is not None:
+            _motor_move(roll1_motor, roll1_val, "Roll1", wait, verbose)
         _motor_move(roll2_pv, row["roll2"], "Roll2", wait, verbose)
         _motor_move(x2_pv,    row["x2"],   "X2",    wait, verbose)
         if isinstance(mono_e_pv, str):
@@ -2602,11 +2631,12 @@ def plot_interpolation(table=None, method="pchip", n_plot=300) -> None:
 def _set_energy_for_row(mono_e, table, mono_e_pv, harmonic_pv, und_e_pv,
                          und_start_pv, roll2_energy_pv, x2_energy_pv, interp_method,
                          energy_settle, simulate, verbose,
-                         pre_energy_pvs=None, post_energy_pvs=None):
+                         roll1_motor=None, pre_energy_pvs=None, post_energy_pvs=None):
     if interp_method is None:
         set_energy(mono_e, table=table, mono_e_pv=mono_e_pv, harmonic_pv=harmonic_pv,
                    und_e_pv=und_e_pv, und_start_pv=und_start_pv,
                    roll2_pv=roll2_energy_pv, x2_pv=x2_energy_pv,
+                   roll1_motor=roll1_motor,
                    wait=True, settle=energy_settle, simulate=simulate, verbose=verbose,
                    debug=False, pre_energy_pvs=pre_energy_pvs, post_energy_pvs=post_energy_pvs)
     else:
@@ -2614,6 +2644,7 @@ def _set_energy_for_row(mono_e, table, mono_e_pv, harmonic_pv, und_e_pv,
                                 mono_e_pv=mono_e_pv, harmonic_pv=harmonic_pv,
                                 und_e_pv=und_e_pv, und_start_pv=und_start_pv,
                                 roll2_pv=roll2_energy_pv, x2_pv=x2_energy_pv,
+                                roll1_motor=roll1_motor,
                                 wait=True, settle=energy_settle, simulate=simulate,
                                 verbose=verbose, debug=False,
                                 pre_energy_pvs=pre_energy_pvs, post_energy_pvs=post_energy_pvs)
@@ -2689,6 +2720,7 @@ def align_beamline(
     row_cb                      = None,
     pre_energy_pvs      : list  = None,
     post_energy_pvs     : list  = None,
+    roll1_motor         : str   = None,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -2944,6 +2976,7 @@ def align_beamline(
                 interp_method=interp_method,
                 energy_settle=energy_settle,
                 simulate=simulate, verbose=verbose,
+                roll1_motor=roll1_motor,
                 pre_energy_pvs=pre_energy_pvs,
                 post_energy_pvs=post_energy_pvs,
             )

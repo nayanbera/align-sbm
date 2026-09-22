@@ -122,7 +122,10 @@ class EnergyTab(QWidget):
         return result
 
     def get_table(self):
-        """Return list of [MonoE, Harmonic, UndE, Roll2, X2] rows (floats)."""
+        """Return list of [MonoE, Harmonic, UndE, Roll2, X2, Roll1] rows.
+
+        Roll1 (index 5) is a float if the cell has a value, or None if blank.
+        """
         rows = []
         for r in range(self._table.rowCount()):
             try:
@@ -131,6 +134,9 @@ class EnergyTab(QWidget):
                     item = self._table.item(r, c)
                     text = item.text().strip() if item else ""
                     row.append(float(text) if text else 0.0)
+                roll1_item = self._table.item(r, _ROLL1_COL)
+                roll1_text = roll1_item.text().strip() if roll1_item else ""
+                row.append(float(roll1_text) if roll1_text else None)
                 rows.append(row)
             except ValueError:
                 pass

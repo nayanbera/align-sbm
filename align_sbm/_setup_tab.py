@@ -678,7 +678,7 @@ class SetupTab(QWidget):
         """Return dict suitable for passing directly to align_beamline()."""
         kwargs = {}
         for key, w in self._pv_widgets.items():
-            if key in ("pv_prefix", "roll1_motor"):
+            if key == "pv_prefix":
                 continue
             kwargs[key] = w.text().strip()
 

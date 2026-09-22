@@ -70,23 +70,29 @@ class _MoveToEnergyThread(QThread):
     def _do_move(self):
         from .smart_scan_functions import caput
         import time
-        kw  = self._kwargs
-        row = self._row
+        kw    = self._kwargs
+        row   = self._row
         mono_e, harmonic, und_e, roll2, x2 = (
             row[0], row[1], row[2], row[3], row[4]
         )
+        roll1       = row[5] if len(row) > 5 else None
+        roll1_motor = kw.get("roll1_motor", "").strip()
         pre_pvs  = kw.get("pre_energy_pvs")  or []
         post_pvs = kw.get("post_energy_pvs") or []
 
         self.log_chunk.emit(
             f"\n[MoveToEnergy] Target: MonoE={mono_e} keV  Harmonic={harmonic}"
-            f"  UndE={und_e} eV  Roll2={roll2}  X2={x2}\n"
+            f"  UndE={und_e} eV  Roll2={roll2}  X2={x2}"
+            + (f"  Roll1={roll1}" if roll1 is not None and roll1_motor else "")
+            + "\n"
         )
 
         if self._simulate:
             lines = ["[MoveToEnergy] SIMULATE — would set:"]
             for entry in pre_pvs:
                 lines.append(f"  [Pre]  caput {entry[0]} → {entry[1]}")
+            if roll1_motor and roll1 is not None:
+                lines.append(f"  roll1_motor ({roll1_motor}) → {roll1}")
             lines += [
                 f"  {kw.get('mono_e_pv','')}  → {mono_e}",
                 f"  {kw.get('harmonic_pv','')} → {harmonic}",
@@ -122,7 +128,11 @@ class _MoveToEnergyThread(QThread):
 
         time.sleep(0.5)
 
-        # Move motors
+        # Move motors (Roll1 first, then Roll2 and X2)
+        if roll1_motor and roll1 is not None:
+            pv = roll1_motor + ".VAL"
+            self.log_chunk.emit(f"[MoveToEnergy] Moving Roll1: caput {pv} → {roll1}\n")
+            caput(pv, roll1, wait=True)
         for motor_key, value, label in [
             ("roll2_motor", roll2, "Roll2"),
             ("x2_motor",    x2,   "X2"),
