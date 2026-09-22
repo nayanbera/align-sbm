@@ -42,13 +42,40 @@ class _MoveToEnergyThread(QThread):
         finally:
             self.done.emit()
 
+    def _apply_extra_pvs(self, pvlist, caput_fn):
+        """Write pre/post energy PV tuples and optionally wait for a readback PV."""
+        import time
+        for entry in pvlist:
+            pvname   = entry[0]
+            value    = entry[1]
+            wait_pv  = entry[2] if len(entry) > 2 else None
+            wait_val = entry[3] if len(entry) > 3 else None
+            self.log_chunk.emit(f"[MoveToEnergy] caput {pvname} → {value}\n")
+            caput_fn(pvname, value, wait=False)
+            if wait_pv:
+                self.log_chunk.emit(
+                    f"[MoveToEnergy] waiting {wait_pv} == {wait_val}\n"
+                )
+                try:
+                    from epics import caget
+                    deadline = time.monotonic() + 30
+                    while time.monotonic() < deadline:
+                        if caget(wait_pv) == wait_val:
+                            break
+                        time.sleep(0.2)
+                except Exception:
+                    pass
+
     def _do_move(self):
         from .smart_scan_functions import caput
+        import time
         kw  = self._kwargs
         row = self._row
         mono_e, harmonic, und_e, roll2, x2 = (
             row[0], row[1], row[2], row[3], row[4]
         )
+        pre_pvs  = kw.get("pre_energy_pvs")  or []
+        post_pvs = kw.get("post_energy_pvs") or []
 
         self.log_chunk.emit(
             f"\n[MoveToEnergy] Target: MonoE={mono_e} keV  Harmonic={harmonic}"
@@ -56,18 +83,27 @@ class _MoveToEnergyThread(QThread):
         )
 
         if self._simulate:
-            self.log_chunk.emit(
-                f"[MoveToEnergy] SIMULATE — would set:\n"
-                f"  {kw.get('mono_e_pv','')}  → {mono_e}\n"
-                f"  {kw.get('harmonic_pv','')} → {harmonic}\n"
-                f"  {kw.get('und_e_pv','')}    → {und_e}\n"
-                f"  {kw.get('und_start_pv','')} → 1\n"
-                f"  {kw.get('roll2_energy_pv','')} → {roll2}\n"
-                f"  {kw.get('x2_energy_pv','')}    → {x2}\n"
-                f"  roll2_motor ({kw.get('roll2_motor','')}) → {roll2}\n"
-                f"  x2_motor    ({kw.get('x2_motor','')})    → {x2}\n"
-            )
+            lines = ["[MoveToEnergy] SIMULATE — would set:"]
+            for entry in pre_pvs:
+                lines.append(f"  [Pre]  caput {entry[0]} → {entry[1]}")
+            lines += [
+                f"  {kw.get('mono_e_pv','')}  → {mono_e}",
+                f"  {kw.get('harmonic_pv','')} → {harmonic}",
+                f"  {kw.get('und_e_pv','')}    → {und_e}",
+                f"  {kw.get('und_start_pv','')} → 1",
+                f"  {kw.get('roll2_energy_pv','')} → {roll2}",
+                f"  {kw.get('x2_energy_pv','')}    → {x2}",
+                f"  roll2_motor ({kw.get('roll2_motor','')}) → {roll2}",
+                f"  x2_motor    ({kw.get('x2_motor','')})    → {x2}",
+            ]
+            for entry in post_pvs:
+                lines.append(f"  [Post] caput {entry[0]} → {entry[1]}")
+            self.log_chunk.emit("\n".join(lines) + "\n")
             return
+
+        # Enable energy pseudomotor (pre-energy PVs)
+        if pre_pvs:
+            self._apply_extra_pvs(pre_pvs, caput)
 
         # Set energy PVs
         for pv_key, value, label in [
@@ -83,7 +119,7 @@ class _MoveToEnergyThread(QThread):
                 self.log_chunk.emit(f"[MoveToEnergy] caput {pv} → {value}\n")
                 caput(pv, value)
 
-        import time; time.sleep(0.5)
+        time.sleep(0.5)
 
         # Move motors
         for motor_key, value, label in [
@@ -95,6 +131,10 @@ class _MoveToEnergyThread(QThread):
                 pv = motor + ".VAL"
                 self.log_chunk.emit(f"[MoveToEnergy] Moving {label}: caput {pv} → {value}\n")
                 caput(pv, value, wait=True)
+
+        # Disable energy pseudomotor (post-energy PVs)
+        if post_pvs:
+            self._apply_extra_pvs(post_pvs, caput)
 
         self.log_chunk.emit("[MoveToEnergy] Done.\n")
 
