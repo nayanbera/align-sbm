@@ -2,7 +2,7 @@
 import csv
 import io
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QFileDialog, QMessageBox, QHeaderView,
@@ -15,6 +15,8 @@ _KEYS = ["MonoE", "Harmonic", "UndE", "Roll2", "X2"]
 
 
 class EnergyTab(QWidget):
+    rows_changed = pyqtSignal()   # emitted whenever row count or MonoE values change
+
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self._settings = settings
@@ -44,6 +46,7 @@ class EnergyTab(QWidget):
             self._table.setColumnWidth(c, width)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSortingEnabled(True)
+        self._table.itemChanged.connect(self.rows_changed)
         layout.addWidget(self._table)
 
         btn_row = QHBoxLayout()
@@ -164,11 +167,14 @@ class EnergyTab(QWidget):
         self._reset()
 
     def _populate(self, rows):
+        self._table.blockSignals(True)
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         for row in rows:
             self._append_row(row)
         self._table.setSortingEnabled(True)
+        self._table.blockSignals(False)
+        self.rows_changed.emit()
 
     def _append_row(self, values=None):
         self._table.setSortingEnabled(False)
@@ -199,6 +205,7 @@ class EnergyTab(QWidget):
         for r in rows:
             if r >= 0:
                 self._table.removeRow(r)
+        self.rows_changed.emit()
 
     def _load_csv(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Energy Table", "", "CSV Files (*.csv)")

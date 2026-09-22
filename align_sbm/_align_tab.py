@@ -569,6 +569,9 @@ class AlignTab(QWidget):
         # Push setup-tab changes to the running worker between rows
         self._setup_tab.config_changed.connect(self._on_setup_changed)
 
+        # Keep energy row list in sync with the energy table
+        self._energy_tab.rows_changed.connect(self._refresh_row_list)
+
     def _build_ui(self):
         root = QHBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Horizontal)
