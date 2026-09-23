@@ -23,6 +23,15 @@ except ImportError:
 _MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2"]
 
 
+class _SortableItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts numerically when both values are numbers."""
+    def __lt__(self, other):
+        try:
+            return float(self.text()) < float(other.text())
+        except ValueError:
+            return super().__lt__(other)
+
+
 class _MoveToEnergyThread(QThread):
     """Background thread that moves all motors to the positions of a selected energy row."""
     log_chunk = pyqtSignal(str)
@@ -849,10 +858,13 @@ class AlignTab(QWidget):
         hdr = self._results_table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setStretchLastSection(False)
+        hdr.setSectionsClickable(True)
+        hdr.setSortIndicatorShown(True)
         for c, width in enumerate([30, 90, 90, 90, 90, 40]):
             self._results_table.setColumnWidth(c, width)
         self._results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._results_table.setSortingEnabled(True)
         res_v.addWidget(self._results_table)
         self._bottom_tabs.addTab(res_frame, "Results")
 
@@ -948,8 +960,11 @@ class AlignTab(QWidget):
         self._csv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._csv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._csv_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
-        self._csv_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents)
+        _csv_hdr = self._csv_table.horizontalHeader()
+        _csv_hdr.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        _csv_hdr.setSectionsClickable(True)
+        _csv_hdr.setSortIndicatorShown(True)
+        self._csv_table.setSortingEnabled(True)
         self._csv_table.setFont(
             QFont("Menlo" if "darwin" in __import__("sys").platform else "Consolas", 9)
         )
@@ -1057,14 +1072,16 @@ class AlignTab(QWidget):
             return
         headers = rows[0]
         data    = rows[1:]
+        self._csv_table.setSortingEnabled(False)
         self._csv_table.setColumnCount(len(headers))
         self._csv_table.setHorizontalHeaderLabels(headers)
         self._csv_table.setRowCount(len(data))
         for r, row in enumerate(data):
             for c, val in enumerate(row):
-                item = QTableWidgetItem(val.strip())
+                item = _SortableItem(val.strip())
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._csv_table.setItem(r, c, item)
+        self._csv_table.setSortingEnabled(True)
         self._csv_table.scrollToBottom()
         self._csv_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
@@ -1622,9 +1639,11 @@ class AlignTab(QWidget):
             item.setForeground(QBrush(active_color) if bold else QBrush())
 
     def _on_row_done(self, record: dict):
+        self._results_table.setSortingEnabled(False)
         r = self._results_table.rowCount()
         self._results_table.insertRow(r)
         ok = record.get("_row_ok", True)
+        from PyQt6.QtGui import QColor
         for c, val in enumerate([
             str(r + 1),
             _fmt(record.get("MonoE"), 6),
@@ -1633,15 +1652,12 @@ class AlignTab(QWidget):
             _fmt(record.get("X2")),
             "✓" if ok else "✗",
         ]):
-            item = QTableWidgetItem(val)
+            item = _SortableItem(val)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if c == 5:
-                item.setForeground(
-                    __import__("PyQt6.QtGui", fromlist=["QColor"]).QColor(
-                        "#66bb6a" if ok else "#ef5350"
-                    )
-                )
+                item.setForeground(QColor("#66bb6a" if ok else "#ef5350"))
             self._results_table.setItem(r, c, item)
+        self._results_table.setSortingEnabled(True)
         self._results_table.scrollToBottom()
         self._refresh_csv()
 
