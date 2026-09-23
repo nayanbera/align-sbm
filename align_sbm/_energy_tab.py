@@ -143,30 +143,37 @@ class EnergyTab(QWidget):
     def update_row_after_alignment(self, mono_e: float, roll2: float, x2: float,
                                    timestamp_str: str):
         """Update Roll2, X2, and the Updated timestamp for the row matching mono_e."""
-        for r in range(self._table.rowCount()):
-            item = self._table.item(r, 0)
-            if item is None:
-                continue
-            try:
-                row_mono_e = float(item.text().strip())
-            except ValueError:
-                continue
-            if abs(row_mono_e - mono_e) < 0.001:
-                for col, text in [(3, f"{roll2:.6g}"), (4, f"{x2:.6g}")]:
-                    cell = self._table.item(r, col)
-                    if cell is None:
-                        cell = QTableWidgetItem()
-                        cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                        self._table.setItem(r, col, cell)
-                    cell.setText(text)
-                ts_item = self._table.item(r, _UPDATED_COL)
-                if ts_item is None:
-                    ts_item = QTableWidgetItem()
-                    ts_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                    ts_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self._table.setItem(r, _UPDATED_COL, ts_item)
-                ts_item.setText(timestamp_str)
-                break
+        self._table.setSortingEnabled(False)
+        self._table.blockSignals(True)
+        try:
+            for r in range(self._table.rowCount()):
+                item = self._table.item(r, 0)
+                if item is None:
+                    continue
+                try:
+                    row_mono_e = float(item.text().strip())
+                except ValueError:
+                    continue
+                if abs(row_mono_e - mono_e) < 0.001:
+                    for col, text in [(3, f"{roll2:.6g}"), (4, f"{x2:.6g}")]:
+                        cell = self._table.item(r, col)
+                        if cell is None:
+                            cell = QTableWidgetItem()
+                            cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                            self._table.setItem(r, col, cell)
+                        cell.setText(text)
+                    ts_item = self._table.item(r, _UPDATED_COL)
+                    if ts_item is None:
+                        ts_item = QTableWidgetItem()
+                        ts_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                        ts_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self._table.setItem(r, _UPDATED_COL, ts_item)
+                    ts_item.setText(timestamp_str)
+                    break
+        finally:
+            self._table.blockSignals(False)
+            self._table.setSortingEnabled(True)
+            self.rows_changed.emit()
 
     def reload_settings(self):
         self._load_settings()
