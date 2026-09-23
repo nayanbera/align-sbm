@@ -70,8 +70,9 @@ Two inner tabs:
 |---|---|
 | PV Prefix | Prefix applied to all PVs when you click *Auto-fill all PVs* |
 | BRG2 / Roll2 / X2 motor | EPICS motor record base PV (e.g. `ID15A2:BRG2`) |
+| Roll1 motor | EPICS motor record base PV for Roll1; when set, Roll1 is moved to the table value at every energy change and alignment step |
 | Detector | Scalar readback PV |
-| Monitor (normalize) | Optional monitor detector PV — when set, all scan signals are divided by this value before fitting, statistics, and plotting (signal normalization). Leave blank to disable. |
+| Monitor (normalize) | Optional monitor detector PV — when set, all scan signals are divided by this value before fitting, statistics, and plotting. Leave blank to disable. |
 | Pitch piezo SP | Setpoint PV for the pitch piezo (`PVAxis`) |
 | Slit V / H SP | Vertical and horizontal slit setpoint PVs |
 | Mono energy | Monochromator energy setpoint PV |
@@ -84,7 +85,7 @@ Each PV field shows a live readback value next to it (updated via CA monitor). A
 
 Editable scan ranges, step counts, slit open/close values, fine-scan settings, settle times, peak-finding method, and output CSV filename. All numeric fields and dropdowns use compact, fixed-width widgets that do not expand horizontally when the window is resized. Mouse-wheel scrolling is disabled on all spinboxes and dropdowns to prevent accidental value changes.
 
-Each scan group (BRG2, Pitch, Roll2, X2) includes a **Normalize with monitor PV** checkbox. When checked, the detector signal for that scan is divided by the Monitor PV value at each point — enabling per-scan normalization control independent of the other scans. The Monitor PV is set in the Motors & PVs tab.
+Each scan group (BRG2, Pitch, Roll2, X2) includes a **Normalize with monitor PV** checkbox. When checked, the detector signal for that scan is divided by the Monitor PV value at each point. The Monitor PV is set in the Motors & PVs tab.
 
 Defaults:
 
@@ -112,25 +113,36 @@ All numeric fields accept typed values of any magnitude (no spinner clamping).
 
 ### Energy Table
 
-A five-column table with rows of the form:
+An eight-column table:
 
-| MonoE (keV) | Harmonic | UndE (eV) | Roll2 (mdeg) | X2 (μm) |
-|---|---|---|---|---|
-| 10.0 | 1 | 10.03 | 3.7 × 10⁶ | −1393 |
-| 12.0 | 1 | 12.05 | 3.3 × 10⁶ | −843 |
-| 16.0 | 3 | 16.06 | 3.0 × 10⁶ | −362 |
-| 20.0 | 3 | 20.10 | 3.7 × 10⁶ | −586 |
-| 25.0 | 3 | 25.10 | 3.3 × 10⁶ | −463 |
-| 30.0 | 3 | 30.13 | 3.4 × 10⁶ | −582 |
+| MonoE (keV) | Harmonic | UndE (eV) | Roll2 (mdeg) | X2 (μm) | Roll1 (mdeg) | Crystal | Updated |
+|---|---|---|---|---|---|---|---|
+| 10.0 | 1 | 10.03 | 3.7 × 10⁶ | −1393 | 0.0 | Si 111 | 2026-09-23 10:04:11 |
+| 12.0 | 1 | 12.05 | 3.3 × 10⁶ | −843 | 0.0 | Si 400 | |
+
+**Columns:**
+
+| Column | Description |
+|---|---|
+| MonoE (keV) | Monochromator target energy |
+| Harmonic | Undulator harmonic |
+| UndE (eV) | Undulator energy |
+| Roll2 (mdeg) | Roll2 motor target; updated automatically after each alignment |
+| X2 (μm) | X2 motor target; updated automatically after each alignment |
+| Roll1 (mdeg) | Roll1 motor target; auto-filled from current Roll1 RBV when a row is added |
+| Crystal | Crystal name for this energy (free text, e.g. `Si 400`); used to enforce crystal matching before alignment or Move to Energy |
+| Updated | Timestamp of the last successful alignment at this energy; read-only |
+
+**Sorting:** Click any column header to sort by that column. Numeric columns sort by value; Crystal and Updated sort alphabetically. An arrow indicator shows the active sort column and direction.
 
 **Buttons:**
 
-- **Add Row / Remove Row** — append or delete rows.
+- **Add Row / Remove Row** — append or delete rows. Roll1 and Crystal are auto-filled from the current Setup readback and crystal status when a row is added.
 - **Load CSV / Save CSV** — import or export the table. The CSV must have header columns `MonoE`, `Harmonic`, `UndE`, `Roll2`, `X2`.
 - **Reset to Defaults** — restore the built-in `table400` values.
 - **Predict from CSV…** — open the prediction dialog (see below).
 
-The table is saved and restored between sessions.
+The table is saved and restored between sessions (including Roll1, Crystal, and Updated fields).
 
 #### Predict from CSV
 
@@ -138,13 +150,13 @@ This dialog fits Roll2 and X2 as a function of MonoE using the alignment history
 
 **Workflow:**
 
-1. The dialog opens with the last alignment CSV pre-loaded (the same file shown in the Alignment → CSV tab). Use *Browse…* to pick a different file.
+1. The dialog opens with the last alignment CSV pre-loaded. Use *Browse…* to pick a different file.
 2. Choose a regression model:
-   - **Polynomial degree 1–4** — uses `numpy.polyfit`; R² is shown for both Roll2 and X2. The maximum available degree is capped at (number of data points − 1).
-   - **Cubic spline** — uses `scipy.interpolate.UnivariateSpline` (requires scipy and ≥ 4 data points); interpolates exactly through every measured point.
+   - **Polynomial degree 1–4** — uses `numpy.polyfit`; R² is shown for both Roll2 and X2.
+   - **Cubic spline** — uses `scipy.interpolate.UnivariateSpline` (requires ≥ 4 data points); interpolates exactly through every measured point.
 3. A side-by-side plot shows the measured data (blue circles) and the fitted curve (orange line) for Roll2 and X2.
-4. In the prediction table, type a MonoE value in the first column — Roll2 and X2 are filled in automatically. **Harmonic** and **UndE** are highlighted amber to indicate they must be provided manually.
-5. Cells with **orange** background indicate the MonoE is outside the training range (extrapolation — use with caution).
+4. In the prediction table, type a MonoE value — Roll2 and X2 are filled in automatically. **Harmonic** and **UndE** are highlighted amber to indicate they must be provided manually.
+5. Cells with **orange** background indicate extrapolation beyond the training range — use with caution.
 6. Click **Add to Energy Table** to append all completed rows.
 
 ---
@@ -155,101 +167,99 @@ This dialog fits Roll2 and X2 as a function of MonoE using the alignment history
 
 **Mode**
 
-- **Simulation** checkbox — when checked, all scans and motor moves are fully simulated (Gaussian + noise, no EPICS). Enabled by default.
+- **Simulation** checkbox — when checked, all scans and motor moves are fully simulated (Gaussian + noise, no EPICS). The energy table is never modified in simulation mode.
+
+**Crystal Status**
+
+A color-coded chip shows the currently active crystal read from the configured EPICS PV. Click **⚙** to set the PV name and define raw-value → display-name + color mappings. The chip updates live via a CA monitor.
 
 **Energy rows to align**
 
-Multi-select list populated from the Energy Table tab. Use **All** / **None** / **Refresh** to manage the selection.
+Multi-select list populated from the Energy Table. Each item is color-coded to match the crystal color configured in Crystal Status. A `"N of M selected"` count is shown above the list.
+
+- Rows whose Crystal field is set to a **different** crystal than the current one are **grayed out and non-selectable** — they cannot be included in an alignment run until the crystal is switched.
+- Rows with no Crystal field set are always selectable.
+- The list updates automatically when: the energy table changes, the sort order changes, the crystal PV value changes, or the crystal mappings are edited.
+- Use **All** / **None** / **Refresh** buttons to manage the selection. **All** only selects rows that are currently enabled (not grayed out).
+
+**Crystal mismatch enforcement:**
+
+- **Start Alignment** — blocked with an error dialog if any selected row's Crystal field doesn't match the current crystal.
+- **Move to Energy** — blocked with an error dialog if the selected row's Crystal field doesn't match the current crystal.
 
 **Run**
 
-- **Start Alignment** — builds the EPICS/simulation context from the Setup tab and runs `align_beamline()` in a background thread for every selected energy row. The per-energy repeat count (see below) is frozen for the duration of the run to prevent mid-run changes.
-- **Abort** — stops the running scan immediately (the background thread is terminated). If looping, no further iterations are started.
-- **Demo Scan (sim)** — runs a single simulated BRG2 `smart_scan` and animates its data points live in the BRG2 plot tab. Useful for verifying the GUI without a beamline.
-- **Loop** checkbox + **Iterations** field — when *Loop* is checked, the full alignment sequence repeats automatically after each pass. Unchecking the box mid-run stops looping after the current pass completes (checked live at each loop boundary).
-  - `0` (default) — runs indefinitely until **Abort** is pressed or the checkbox is unchecked.
-  - `N > 0` — runs exactly N times then stops.
-  - The log marks each iteration with `Loop N/total` headers. The results table accumulates across all loops.
-  - The **per-energy repeat** spinbox (number of times each energy row is run within a single pass) is disabled while alignment is running and re-enabled when it finishes or is aborted.
-- **Currently running row** — the energy row that is actively being aligned is highlighted in amber with bold text in the energy list. Highlighting is cleared when the run finishes or is aborted.
+- **Start Alignment** — builds the EPICS/simulation context from the Setup tab and runs `align_beamline()` in a background thread for every selected energy row.
+- **Abort** — stops the running scan immediately.
+- **Demo Scan (sim)** — runs a single simulated BRG2 `smart_scan` and animates its data points live.
+- **Loop** checkbox + **Iterations** field — when *Loop* is checked, the full alignment sequence repeats automatically. Unchecking mid-run stops looping after the current pass completes. `0` = run indefinitely; `N > 0` = run exactly N times.
+- The **per-energy repeat** spinbox is disabled while alignment is running and re-enabled when finished or aborted.
+- The **currently running row** is highlighted in amber with bold text. Highlighting is cleared when the run finishes or is aborted.
 
 #### Right panel — output
 
 **Plot tabs (BRG2 / Pitch / Roll2 / X2)**
 
-Each motor has its own tab. During a scan, data points appear in real time with two colours:
+Each motor has its own tab. During a scan, data points appear in real time:
 
 | Colour | Meaning |
 |---|---|
 | Blue (`#4fc3f7`) | Coarse sweep points |
-| Green (`#66bb6a`) | Fine scan points (narrower window centred on the coarse peak) |
+| Green (`#66bb6a`) | Fine scan points |
 
-On scan completion the fitted curve (red line) and peak marker (dashed orange vertical line) are overlaid. A parameter annotation in the top-right corner shows Profile, Center, FWHM, Sigma, Amplitude, Offset (and the super-Gaussian *p* exponent when applicable).
+On completion: fitted curve (red line), peak marker (dashed orange vertical line), and a parameter annotation (Profile, Center, FWHM, Sigma, Amplitude, Offset).
 
 **Bottom tabs**
 
 | Tab | Contents |
 |---|---|
-| Results | Summary table — one row per completed energy row: MonoE, BRG2 centre, Roll2 RBV, X2 RBV, pass/fail tick. |
-| Log | Live stdout from the backend — per-step scan tables, fit results, warnings, and `[SIM]` tags. |
-| CSV | Live view of the output CSV file. Refreshes automatically after each completed energy row. |
+| Results | Summary table — one row per completed energy row: MonoE, BRG2 centre, Roll2 RBV, X2 RBV, pass/fail. Sortable by any column. |
+| Log | Live stdout from the backend. |
+| CSV | Live view of the output CSV file. Sortable by any column. Refreshes automatically after each completed energy row. |
 
 **CSV tab controls:**
 
-- **Open CSV…** — load an existing CSV file to append new results to. The column layout must match the current setup (record PVs). Adopts the file as the new output target.
-- **Delete Row(s)** — permanently remove selected rows from the CSV file (confirmation required; file is rewritten in place).
+- **Open CSV…** — load an existing CSV file to append new results to.
+- **Delete Row(s)** — permanently remove selected rows (confirmation required).
 - **Refresh** — manually reload the CSV view.
-- **Analyze…** — open the statistical analysis dialog for the current CSV file (see below).
-- The path of the last opened or written CSV is remembered and the file is loaded automatically the next time the application starts.
+- **Analyze…** — open the statistical analysis dialog.
+- **Add Column…** — add a new column to the CSV file backed by an EPICS PV.
+- The path of the last opened or written CSV is remembered and auto-loaded on next launch.
+
+**CSV color coding** — a **Color by:** selector and **Edit Rules…** button appear in the CSV tab header. Rules are evaluated against the chosen column and the first matching rule wins. Each rule has an Operator, Value(s), an optional Label, and a Color. Legend chips above the table show the active rules.
 
 #### Statistical Analysis Dialog
 
-Opened via **Analyze…** in the CSV tab. Accepts any alignment CSV (auto-loaded from the current file; use *Browse…* to pick another).
+Opened via **Analyze…** in the CSV tab.
 
-A **Date range** filter row (start / end date pickers + Reset button) appears below the file info line. When a CSV with a `datetime` column is loaded, the pickers default to the full date range. Changing either date immediately re-runs all plots, the report, and model training — only rows within the selected range are included in the statistics.
+A **Date range** filter re-runs all plots, the report, and model training — only rows within the selected range are included.
 
-**Plots tab** — interactive matplotlib figure with zoom/pan toolbar, arranged in a 3 × 2 grid:
+**Plots tab** — 3 × 2 matplotlib grid: Roll2/X2 time series, mean±std bar charts, Pearson correlation heatmap, Roll2 vs X2 scatter.
 
-| Position | Plot |
-|---|---|
-| Top-left | Roll2 vs measurement index, one trace per MonoE energy |
-| Top-right | X2 vs measurement index, one trace per MonoE energy |
-| Middle-left | Roll2 mean ± std bar chart per energy group |
-| Middle-right | X2 mean ± std bar chart per energy group |
-| Bottom-left | Pearson correlation heatmap for all numeric columns, with annotated *r* values |
-| Bottom-right | Roll2 vs X2 scatter plot, coloured by MonoE |
+**Report tab** — six sections: Descriptive Statistics, Per-Energy Group Statistics (CV% color-coded), Pearson Correlation, Spearman Correlation, Drift Analysis, Strongest Pairwise Correlations.
 
-**Report tab** — scrollable HTML report with six sections:
-
-1. **Descriptive Statistics** — count, mean, std, min, 25 %, median, 75 %, max for every numeric column.
-2. **Per-Energy Group Statistics** — mean, std, and coefficient of variation (CV %) for Roll2 and X2 at each MonoE. CV is colour-coded: green < 0.5 %, amber < 2 % (reproducibility indicator across repeated loops).
-3. **Pearson Correlation Matrix** — pairwise linear correlation between all numeric columns.
-4. **Spearman Rank Correlation Matrix** — non-parametric alternative; requires scipy.
-5. **Drift Analysis** — for each (MonoE, column) pair, fits a linear trend to the measurement sequence and reports slope, intercept, and R². A near-zero slope indicates stable alignment; a large slope flags positional drift across loops.
-6. **Strongest Pairwise Correlations** — top-10 column pairs ranked by |r|, with plain-language interpretation (negligible / weak / moderate / strong / very strong, positive / negative).
-
-**Export Report…** saves the full report as a standalone HTML file.
+**Predict tab** — fits Roll2 and X2 vs MonoE; LOO/k-fold CV; uncertainty bands; "Send selected to Energy Table".
 
 ---
 
 ## Alignment Sequence
 
-For each selected energy row `align_beamline()` runs these steps in order:
+For each selected energy row `align_beamline()` runs these steps:
 
 | Step | Action |
 |---|---|
 | a | Open slits to configured open positions |
-| b | Home pitch piezo to `pitch_home` |
-| c | `smart_scan` BRG2 → move to peak position |
+| b | Home pitch piezo |
+| c | `smart_scan` BRG2 → move to peak |
 | d | `fly_scan` pitch → move to peak |
 | e | Close vertical slit |
 | f | `smart_scan` Roll2 → move to centroid |
 | f2 | `fly_scan` pitch (repeat) |
 | g-pre | Close horizontal slit |
 | g | `smart_scan` X2 → move to centroid |
-| h | Record RBVs and write CSV row |
+| h | Record RBVs, write CSV row, update Energy Table (Roll2, X2, timestamp) |
 
-The CSV output file (default `alignment_results.csv`) grows one row per energy, with columns: `datetime`, `MonoE`, `Harmonic`, `UndE`, `Roll2`, `X2`.
+Roll1 is moved to the table value at the energy-change step (before scanning) when a Roll1 motor is configured.
 
 ---
 
@@ -259,27 +269,25 @@ The CSV output file (default `alignment_results.csv`) grows one row per energy, 
 
 `smart_scan` runs in two phases:
 
-1. **Coarse sweep** (blue dots) — scans from `start` to `stop` in `nsteps` steps. If the peak lands near the scan edge, the range is extended automatically until the peak is fully captured.
-2. **Fine scan** (green dots) — centres a narrower window (default ±3σ, 21 steps) on the coarse peak and refines the position. The motor moves to the start of the fine range *before* the detector flush, so no wasted traversal occurs between phases.
+1. **Coarse sweep** (blue dots) — scans from `start` to `stop` in `nsteps` steps. If the peak lands near the scan edge, the range is extended automatically.
+2. **Fine scan** (green dots) — centres a narrower window (default ±3σ, 21 steps) on the coarse peak and refines the position.
 
 ### Peak-finding logic
-
-After each scan the motor moves to a position chosen by `_choose_centre()`:
 
 ```
 FWHM > |peak_pos − centroid|  →  move to centroid
 otherwise                      →  move to peak_pos
 ```
 
-With `peak_method="stats"` (default) all metrics are model-free (centroid, RMS width, FWHM by linear interpolation). With `peak_method="fit"` the code fits a Gaussian, Lorentzian, or super-Gaussian and picks the lowest-residual model.
+With `peak_method="stats"` (default) all metrics are model-free. With `peak_method="fit"` the code fits a Gaussian, Lorentzian, or super-Gaussian and picks the lowest-residual model.
 
 ### Backlash correction
 
-When `backlash_correction=True`, the motor overshoots the target by one FWHM in the direction opposite to the scan, then approaches from the scan direction — ensuring a consistent final approach.
+When `backlash_correction=True`, the motor overshoots the target by one FWHM then approaches from the scan direction.
 
 ### DMOV delay
 
-EPICS motor records may take 0.2 s or more to clear the DMOV (done-moving) flag after a move command is issued. The `dmov_delay` parameter (default **0.25 s**) inserts a fixed sleep between the move command and the start of DMOV polling, preventing false "done" reads on slow motor records. It is applied in every stepped motor move (`smart_scan`, `align_beamline`) and is configurable from the Fine Scan group in the Setup tab.
+The `dmov_delay` parameter (default **0.25 s**) inserts a fixed sleep between the move command and the start of DMOV polling. Configurable from the Fine Scan group in Setup.
 
 ---
 
@@ -290,13 +298,12 @@ The backend is self-contained in `align_sbm/smart_scan_functions.py` and has no 
 ```python
 from align_sbm import smart_scan, fly_scan, align_beamline, BeamlineConfig, table400
 
-# Simulate a single scan (with optional monitor normalization)
+# Simulate a single scan
 result = smart_scan(
     motor="IOC:m1", det="IOC:det",
     start=-1.0, stop=1.0, nsteps=21,
     simulate=True, sim_center=0.1, sim_sigma=0.3,
-    sim_amplitude=1000, sim_noise=10,
-    monitor_pv="IOC:monitor",   # optional — divides det by monitor at each point
+    monitor_pv="IOC:monitor",   # optional normalization
 )
 print(result.center, result.sigma)
 
@@ -308,6 +315,7 @@ results = align_beamline(
     brg2="ID15A2:BRG2",
     roll2_motor="ID15A2:Roll2",
     x2_motor="ID15A2:X2",
+    roll1_motor="ID15A2:Roll1",   # optional
     pitch_pv="ID15A2:PitchPiezo:SP",
     slit_v_pv="ID15A2:SlitV:SP",
     slit_h_pv="ID15A2:SlitH:SP",
@@ -318,12 +326,9 @@ results = align_beamline(
     roll2_energy_pv="ID15A2:Roll2:EnergySet",
     x2_energy_pv="ID15A2:X2:EnergySet",
     filename="alignment_results.csv",
-    # optional monitor normalization (per-scan on/off flags default to True)
     monitor_pv="ID15A2:monitor",
-    monitor_brg2=True,
-    monitor_pitch=True,
-    monitor_roll2=True,
-    monitor_x2=True,
+    monitor_brg2=True, monitor_pitch=True,
+    monitor_roll2=True, monitor_x2=True,
 )
 ```
 
@@ -331,7 +336,7 @@ results = align_beamline(
 
 | Class / function | Purpose |
 |---|---|
-| `smart_scan(motor, det, start, stop, …)` | Stepped scan with coarse + fine phases; extends range if peak is at edge |
+| `smart_scan(motor, det, start, stop, …)` | Stepped scan with coarse + fine phases |
 | `fly_scan(motor, det, start, stop, …)` | Continuous-motion scan with threaded sampling |
 | `align_beamline(table, …)` | Full multi-step alignment for a list of energy rows |
 | `BeamlineConfig` | Dataclass holding all motors, PVs, and scan parameters |
@@ -340,11 +345,9 @@ results = align_beamline(
 | `ScanStatus` | Enum: SUCCESS, NO_PEAK, OUT_OF_RANGE, FIT_FAILED, INSUFFICIENT_DATA |
 | `stats_peak(positions, signals)` | Model-free peak estimators: centroid, RMS width, FWHM, weighted median |
 
-**Monitor normalization** — both `smart_scan` and `fly_scan` accept a `monitor_pv` keyword. When set (non-empty string), the detector value at each point is divided by the monitor PV readback before any fitting or statistics are computed. This normalization is applied inside `_Interface.read()` / `_FlyInterface.read_detector()`, so all downstream code (peak-finding, Gaussian fit, plot data, CSV output) automatically operates on normalized signals. `align_beamline` additionally accepts `monitor_brg2`, `monitor_pitch`, `monitor_roll2`, and `monitor_x2` boolean flags to enable or disable normalization independently for each scan step.
-
 ### Simulation mode
 
-When `pyepics` is not installed, or when `simulate=True` is passed, all motor moves and detector reads are replaced by Gaussian + noise signal generation. The scan logic (coarse sweep, peak-finding, fine scan, extend-if-edge) runs identically.
+When `pyepics` is not installed, or when `simulate=True` is passed, all motor moves and detector reads are replaced by Gaussian + noise signal generation. The scan logic runs identically.
 
 ---
 
