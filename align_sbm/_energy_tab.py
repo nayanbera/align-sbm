@@ -41,8 +41,9 @@ class EnergyTab(QWidget):
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
-        self._settings     = settings
-        self._auto_fill_fn = None   # callable() → {"crystal": str, "roll1": str}
+        self._settings          = settings
+        self._auto_fill_fn      = None   # callable() → {"crystal": str, "roll1": str}
+        self._crystal_color_fn  = None   # callable(crystal_name) → hex color str or ""
         self._build_ui()
         self._load_settings()
 
@@ -74,7 +75,7 @@ class EnergyTab(QWidget):
             self._table.setColumnWidth(c, width)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSortingEnabled(True)
-        self._table.itemChanged.connect(self.rows_changed)
+        self._table.itemChanged.connect(self._on_item_changed)
         self._table.horizontalHeader().sortIndicatorChanged.connect(
             lambda *_: QTimer.singleShot(0, self.rows_changed.emit)
         )
@@ -106,6 +107,41 @@ class EnergyTab(QWidget):
     def set_auto_fill_fn(self, fn):
         """Set a callable invoked when Add Row is clicked: fn() → {"crystal": str, "roll1": str}."""
         self._auto_fill_fn = fn
+
+    def set_crystal_color_fn(self, fn):
+        """Set a callable fn(crystal_name) → hex color str used to color table rows."""
+        self._crystal_color_fn = fn
+        self.refresh_row_colors()
+
+    def refresh_row_colors(self):
+        """Re-apply crystal colors to every row (call when mappings change)."""
+        for r in range(self._table.rowCount()):
+            self._apply_row_color(r)
+
+    def _apply_row_color(self, r: int):
+        from PyQt6.QtGui import QColor, QBrush
+        if self._crystal_color_fn is None:
+            return
+        cr_item = self._table.item(r, _CRYSTAL_COL)
+        crystal  = cr_item.text().strip() if cr_item else ""
+        hex_color = self._crystal_color_fn(crystal) if crystal else ""
+        self._table.blockSignals(True)
+        try:
+            for c in range(self._table.columnCount()):
+                item = self._table.item(r, c)
+                if item is None:
+                    continue
+                if hex_color:
+                    item.setBackground(QBrush(QColor(hex_color)))
+                else:
+                    item.setBackground(QBrush())
+        finally:
+            self._table.blockSignals(False)
+
+    def _on_item_changed(self, item):
+        self.rows_changed.emit()
+        if item.column() == _CRYSTAL_COL:
+            self._apply_row_color(item.row())
 
     def get_row_crystals(self) -> list:
         """Return the crystal name for each row (empty string if none)."""
@@ -238,6 +274,7 @@ class EnergyTab(QWidget):
             self._append_row(row)
         self._table.setSortingEnabled(True)
         self._table.blockSignals(False)
+        self.refresh_row_colors()
         self.rows_changed.emit()
 
     def _append_row(self, values=None):
@@ -280,6 +317,7 @@ class EnergyTab(QWidget):
         updated_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(r, _UPDATED_COL, updated_item)
 
+        self._apply_row_color(r)
         self._table.setSortingEnabled(True)
 
     def _add_row(self):

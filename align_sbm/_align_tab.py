@@ -267,7 +267,8 @@ class _ColorRuleDialog(QDialog):
         c = QColor(hex_color)
         lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
         fg = "#000000" if lum > 128 else "#ffffff"
-        btn.setStyleSheet(f"background-color: {hex_color}; color: {fg}; border-radius: 3px;")
+        rgba = f"rgba({c.red()},{c.green()},{c.blue()},{c.alpha()})"
+        btn.setStyleSheet(f"background-color: {rgba}; color: {fg}; border-radius: 3px;")
         btn.setText(hex_color)
 
     def _pick_color(self):
@@ -275,9 +276,12 @@ class _ColorRuleDialog(QDialog):
         from PyQt6.QtGui import QColor
         btn = self.sender()
         current = btn.property("color_hex") or "#4caf50"
-        c = QColorDialog.getColor(QColor(current), self)
+        c = QColorDialog.getColor(
+            QColor(current), self,
+            options=QColorDialog.ColorDialogOption.ShowAlphaChannel,
+        )
         if c.isValid():
-            self._set_color_btn(btn, c.name())
+            self._set_color_btn(btn, c.name(QColor.NameFormat.HexArgb))
 
     def _remove_row(self):
         btn = self.sender()
@@ -373,9 +377,12 @@ class _CrystalConfigDialog(QDialog):
         from PyQt6.QtWidgets import QColorDialog
         from PyQt6.QtGui import QColor
         btn = self.sender()
-        c = QColorDialog.getColor(QColor(btn.property("color_hex") or "#1565c0"), self)
+        c = QColorDialog.getColor(
+            QColor(btn.property("color_hex") or "#1565c0"), self,
+            options=QColorDialog.ColorDialogOption.ShowAlphaChannel,
+        )
         if c.isValid():
-            _ColorRuleDialog._set_color_btn(btn, c.name())
+            _ColorRuleDialog._set_color_btn(btn, c.name(QColor.NameFormat.HexArgb))
 
     def _remove_selected(self):
         row = self._table.currentRow()
@@ -487,9 +494,10 @@ class _CrystalStatusWidget(QWidget):
                 c     = QColor(color)
                 lum   = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
                 fg    = "#000000" if lum > 128 else "#ffffff"
+                rgba  = f"rgba({c.red()},{c.green()},{c.blue()},{c.alpha()})"
                 self._chip.setText(label)
                 self._chip.setStyleSheet(
-                    f"background-color: {color}; color: {fg}; border-radius: 4px; "
+                    f"background-color: {rgba}; color: {fg}; border-radius: 4px; "
                     "padding: 2px 10px; font-weight: bold;"
                 )
                 self.crystal_changed.emit()
@@ -614,6 +622,10 @@ class AlignTab(QWidget):
         self._energy_tab.rows_changed.connect(self._refresh_row_list)
         self._crystal_widget.mappings_changed.connect(self._refresh_row_list)
         self._crystal_widget.crystal_changed.connect(self._refresh_row_list)
+
+        # Wire crystal colors into the energy table
+        self._energy_tab.set_crystal_color_fn(self._crystal_widget.color_for_display_name)
+        self._crystal_widget.mappings_changed.connect(self._energy_tab.refresh_row_colors)
 
         # Auto-fill Roll1 + Crystal when a new energy row is added
         self._energy_tab.set_auto_fill_fn(self._energy_auto_fill)
