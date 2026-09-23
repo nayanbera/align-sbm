@@ -2,7 +2,7 @@
 import csv
 import io
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QFileDialog, QMessageBox, QHeaderView,
@@ -76,7 +76,7 @@ class EnergyTab(QWidget):
         self._table.setSortingEnabled(True)
         self._table.itemChanged.connect(self.rows_changed)
         self._table.horizontalHeader().sortIndicatorChanged.connect(
-            lambda *_: self.rows_changed.emit()
+            lambda *_: QTimer.singleShot(0, self.rows_changed.emit)
         )
         layout.addWidget(self._table)
 
