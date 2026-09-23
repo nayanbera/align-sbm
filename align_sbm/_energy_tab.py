@@ -27,6 +27,15 @@ _SAVE_CRYSTAL = 6
 _SAVE_ROLL1   = 7
 
 
+class _NumericItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts numerically instead of lexicographically."""
+    def __lt__(self, other):
+        try:
+            return float(self.text()) < float(other.text())
+        except ValueError:
+            return super().__lt__(other)
+
+
 class EnergyTab(QWidget):
     rows_changed = pyqtSignal()   # emitted whenever row count or MonoE values change
 
@@ -158,7 +167,7 @@ class EnergyTab(QWidget):
                     for col, text in [(3, f"{roll2:.6g}"), (4, f"{x2:.6g}")]:
                         cell = self._table.item(r, col)
                         if cell is None:
-                            cell = QTableWidgetItem()
+                            cell = _NumericItem()
                             cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                             self._table.setItem(r, col, cell)
                         cell.setText(text)
@@ -242,13 +251,13 @@ class EnergyTab(QWidget):
 
         # Data columns (0-4)
         for c, v in enumerate(vals[:len(_KEYS)]):
-            item = QTableWidgetItem(str(v))
+            item = _NumericItem(str(v))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(r, c, item)
 
         # Roll1 column (5) — plain editable text
         roll1_text = str(vals[_SAVE_ROLL1]) if len(vals) > _SAVE_ROLL1 else ""
-        roll1_item = QTableWidgetItem(roll1_text)
+        roll1_item = _NumericItem(roll1_text)
         roll1_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(r, _ROLL1_COL, roll1_item)
 
