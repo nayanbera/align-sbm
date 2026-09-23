@@ -405,6 +405,7 @@ class _CrystalStatusWidget(QWidget):
     """Chip showing the current crystal, updated via CA monitor."""
     _pv_received    = pyqtSignal(str)   # CA thread → Qt main thread
     mappings_changed = pyqtSignal()     # emitted when the user edits crystal mappings
+    crystal_changed  = pyqtSignal()     # emitted whenever the active crystal changes
 
     def __init__(self, settings=None, parent=None):
         super().__init__(parent)
@@ -477,6 +478,7 @@ class _CrystalStatusWidget(QWidget):
                 "background-color: #555; color: #fff; border-radius: 4px; "
                 "padding: 2px 10px; font-weight: bold;"
             )
+            self.crystal_changed.emit()
             return
         for m in self._mappings:
             if m.get("raw", "").strip() == raw_value:
@@ -490,6 +492,7 @@ class _CrystalStatusWidget(QWidget):
                     f"background-color: {color}; color: {fg}; border-radius: 4px; "
                     "padding: 2px 10px; font-weight: bold;"
                 )
+                self.crystal_changed.emit()
                 return
         # No mapping matched — show raw value in a neutral chip
         self._chip.setText(raw_value)
@@ -497,6 +500,7 @@ class _CrystalStatusWidget(QWidget):
             "background-color: #37474f; color: #fff; border-radius: 4px; "
             "padding: 2px 10px; font-weight: bold;"
         )
+        self.crystal_changed.emit()
 
     def get_display_names(self) -> list:
         """Return the list of crystal display names from the current mappings."""
@@ -606,9 +610,10 @@ class AlignTab(QWidget):
         # Push setup-tab changes to the running worker between rows
         self._setup_tab.config_changed.connect(self._on_setup_changed)
 
-        # Keep energy row list in sync with the energy table and crystal colors
+        # Keep energy row list in sync with the energy table and crystal status
         self._energy_tab.rows_changed.connect(self._refresh_row_list)
         self._crystal_widget.mappings_changed.connect(self._refresh_row_list)
+        self._crystal_widget.crystal_changed.connect(self._refresh_row_list)
 
         # Auto-fill Roll1 + Crystal when a new energy row is added
         self._energy_tab.set_auto_fill_fn(self._energy_auto_fill)
@@ -758,24 +763,30 @@ class AlignTab(QWidget):
                     for i in range(self._row_list.count())
                     if self._row_list.item(i).isSelected()}
         self._row_list.clear()
-        crystals = self._energy_tab.get_row_crystals()
+        crystals        = self._energy_tab.get_row_crystals()
+        current_crystal = self._crystal_widget.current_display_name()
         for i, label in enumerate(self._energy_tab.get_row_labels()):
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, i)
             crystal = crystals[i] if i < len(crystals) else ""
-            if crystal:
+            # Determine whether this row is disabled (crystal mismatch)
+            mismatched = (bool(current_crystal) and bool(crystal)
+                          and crystal.strip() != current_crystal.strip())
+            if mismatched:
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled)   # selectable removed → grayed
+            elif crystal:
                 hex_color = self._crystal_widget.color_for_display_name(crystal)
                 if hex_color:
-                    c = QColor(hex_color)
+                    c   = QColor(hex_color)
                     lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
-                    fg = QColor("#000000" if lum > 128 else "#ffffff")
                     item.setBackground(QBrush(c))
-                    item.setForeground(QBrush(fg))
+                    item.setForeground(QBrush(QColor("#000000" if lum > 128 else "#ffffff")))
             self._row_list.addItem(item)
         if selected:
             for i in range(self._row_list.count()):
-                self._row_list.item(i).setSelected(
-                    self._row_list.item(i).text() in selected)
+                it = self._row_list.item(i)
+                it.setSelected(it.text() in selected
+                               and bool(it.flags() & Qt.ItemFlag.ItemIsSelectable))
         else:
             self._select_all_rows()
         self._update_row_count_label()
@@ -787,7 +798,9 @@ class AlignTab(QWidget):
 
     def _select_all_rows(self):
         for i in range(self._row_list.count()):
-            self._row_list.item(i).setSelected(True)
+            it = self._row_list.item(i)
+            if it.flags() & Qt.ItemFlag.ItemIsSelectable:
+                it.setSelected(True)
 
     def _select_no_rows(self):
         self._row_list.clearSelection()
