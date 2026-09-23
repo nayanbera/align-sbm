@@ -62,6 +62,7 @@ class StatsDialog(QDialog):
         self._num_cols    = []
         self._n_rows      = 0
         self._row_dates   = []
+        self._row_crystals = []   # crystal name per CSV row (from energy table lookup)
         self._report_html = ""
         # Trained models: col → {"mean_fn": callable, "std_fn": callable,
         #                         "train_r2": float, "cv_r2": float, "rmse": float}
@@ -120,6 +121,17 @@ class StatsDialog(QDialog):
         self._date_start.dateChanged.connect(self._refresh)
         self._date_end.dateChanged.connect(self._refresh)
         layout.addLayout(dr)
+
+        # Crystal filter row
+        cr = QHBoxLayout()
+        cr.addWidget(QLabel("Crystal:"))
+        self._crystal_cb = QComboBox()
+        self._crystal_cb.setMinimumWidth(140)
+        self._crystal_cb.addItem("All crystals")
+        self._crystal_cb.currentIndexChanged.connect(self._refresh)
+        cr.addWidget(self._crystal_cb)
+        cr.addStretch()
+        layout.addLayout(cr)
 
         # Column selector
         col_grp = QGroupBox("Columns to analyze")
@@ -370,6 +382,56 @@ class StatsDialog(QDialog):
         self._date_end.blockSignals(False)
         self._refresh()
 
+    # ── Crystal filter helpers ────────────────────────────────────────────────
+
+    def _build_crystal_map(self) -> dict:
+        """Return {mono_e_float: crystal_str} from the energy table, skipping blanks."""
+        if self._energy_tab is None:
+            return {}
+        try:
+            rows     = self._energy_tab.get_table()
+            crystals = self._energy_tab.get_row_crystals()
+        except Exception:
+            return {}
+        result = {}
+        for i, row in enumerate(rows):
+            if not row:
+                continue
+            crystal = crystals[i].strip() if i < len(crystals) else ""
+            if crystal:
+                result[float(row[0])] = crystal
+        return result
+
+    def _lookup_crystal(self, mono_e: float, crystal_map: dict) -> str:
+        for table_e, crystal in crystal_map.items():
+            if abs(mono_e - table_e) < 0.001:
+                return crystal
+        return ""
+
+    def _rebuild_crystal_filter(self):
+        prev = self._crystal_cb.currentText()
+        self._crystal_cb.blockSignals(True)
+        self._crystal_cb.clear()
+        self._crystal_cb.addItem("All crystals")
+        unique = sorted({c for c in self._row_crystals if c})
+        for name in unique:
+            self._crystal_cb.addItem(name)
+        idx = self._crystal_cb.findText(prev)
+        self._crystal_cb.setCurrentIndex(max(0, idx))
+        self._crystal_cb.blockSignals(False)
+        self._crystal_cb.setEnabled(bool(unique))
+
+    def _crystal_mask(self) -> np.ndarray:
+        n = self._n_rows
+        sel = self._crystal_cb.currentText()
+        if not self._row_crystals or sel == "All crystals":
+            return np.ones(n, dtype=bool)
+        return np.array([c == sel for c in self._row_crystals], dtype=bool)
+
+    def _active_mask(self) -> np.ndarray:
+        """Combined date-range + crystal filter mask."""
+        return self._date_mask() & self._crystal_mask()
+
     # ── Data loading ──────────────────────────────────────────────────────────
 
     def _browse(self):
@@ -420,6 +482,17 @@ class StatsDialog(QDialog):
                 self._num_cols.append(k)
             except (ValueError, TypeError):
                 pass
+
+        # Build per-row crystal labels by matching MonoE to the energy table
+        crystal_map = self._build_crystal_map()
+        mono_vals = raw.get("MonoE", [])
+        self._row_crystals = []
+        for v in mono_vals:
+            try:
+                self._row_crystals.append(self._lookup_crystal(float(v), crystal_map))
+            except (ValueError, TypeError):
+                self._row_crystals.append("")
+        self._rebuild_crystal_filter()
 
         # Populate date range widgets
         valid_dates = [d for d in self._row_dates if d is not None]
@@ -528,7 +601,7 @@ class StatsDialog(QDialog):
                 w.setParent(None)
                 w.deleteLater()
 
-        mask = self._date_mask()
+        mask = self._active_mask()
         d    = {k: v[mask] for k, v in self._data.items()}
         n    = int(mask.sum())
         idx  = np.arange(n)
@@ -634,7 +707,7 @@ class StatsDialog(QDialog):
         if not self._data:
             return
 
-        mask = self._date_mask()
+        mask = self._active_mask()
         _d = {k: v[mask] for k, v in self._data.items()}
 
         # Determine training targets
@@ -1146,7 +1219,7 @@ class StatsDialog(QDialog):
     """
 
     def _make_report(self, sel_cols):
-        mask = self._date_mask()
+        mask = self._active_mask()
         d    = {k: v[mask] for k, v in self._data.items()}
         n    = int(mask.sum())
         nc   = self._num_cols
