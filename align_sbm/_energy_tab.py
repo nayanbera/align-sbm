@@ -67,6 +67,9 @@ class EnergyTab(QWidget):
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hdr.setStretchLastSection(False)
+        hdr.setSectionsClickable(True)
+        hdr.setSortIndicatorShown(True)
+        hdr.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
         for c, width in enumerate([90, 80, 90, 100, 90, 100, 110, 150]):
             self._table.setColumnWidth(c, width)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
