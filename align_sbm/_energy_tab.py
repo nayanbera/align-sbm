@@ -75,6 +75,9 @@ class EnergyTab(QWidget):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSortingEnabled(True)
         self._table.itemChanged.connect(self.rows_changed)
+        self._table.horizontalHeader().sortIndicatorChanged.connect(
+            lambda *_: self.rows_changed.emit()
+        )
         layout.addWidget(self._table)
 
         btn_row = QHBoxLayout()

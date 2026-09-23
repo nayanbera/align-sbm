@@ -507,6 +507,13 @@ class _CrystalStatusWidget(QWidget):
         text = self._chip.text()
         return "" if text == "—" else text
 
+    def color_for_display_name(self, display_name: str) -> str:
+        """Return the configured hex color for a crystal display label, or '' if not found."""
+        for m in self._mappings:
+            if m.get("label", "").strip() == display_name.strip():
+                return m.get("color", "")
+        return ""
+
     def _configure(self):
         dlg = _CrystalConfigDialog(
             pv_name=self._pv_name,
@@ -599,8 +606,9 @@ class AlignTab(QWidget):
         # Push setup-tab changes to the running worker between rows
         self._setup_tab.config_changed.connect(self._on_setup_changed)
 
-        # Keep energy row list in sync with the energy table
+        # Keep energy row list in sync with the energy table and crystal colors
         self._energy_tab.rows_changed.connect(self._refresh_row_list)
+        self._crystal_widget.mappings_changed.connect(self._refresh_row_list)
 
         # Auto-fill Roll1 + Crystal when a new energy row is added
         self._energy_tab.set_auto_fill_fn(self._energy_auto_fill)
@@ -636,9 +644,13 @@ class AlignTab(QWidget):
 
         energy_grp = QGroupBox("Energy rows to align")
         ev = QVBoxLayout(energy_grp)
+        self._row_count_lbl = QLabel("0 of 0 selected")
+        self._row_count_lbl.setStyleSheet("font-size: 11px; color: #aaa;")
+        ev.addWidget(self._row_count_lbl)
         self._row_list = QListWidget()
         self._row_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self._row_list.setMaximumHeight(180)
+        self._row_list.itemSelectionChanged.connect(self._update_row_count_label)
         ev.addWidget(self._row_list)
         row_btns = QHBoxLayout()
         for label, slot in [("All",  self._select_all_rows),
@@ -740,14 +752,25 @@ class AlignTab(QWidget):
         return panel
 
     def _refresh_row_list(self):
+        from PyQt6.QtGui import QColor, QBrush
         # Preserve current selection by label so edits don't reset it.
         selected = {self._row_list.item(i).text()
                     for i in range(self._row_list.count())
                     if self._row_list.item(i).isSelected()}
         self._row_list.clear()
+        crystals = self._energy_tab.get_row_crystals()
         for i, label in enumerate(self._energy_tab.get_row_labels()):
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, i)
+            crystal = crystals[i] if i < len(crystals) else ""
+            if crystal:
+                hex_color = self._crystal_widget.color_for_display_name(crystal)
+                if hex_color:
+                    c = QColor(hex_color)
+                    lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+                    fg = QColor("#000000" if lum > 128 else "#ffffff")
+                    item.setBackground(QBrush(c))
+                    item.setForeground(QBrush(fg))
             self._row_list.addItem(item)
         if selected:
             for i in range(self._row_list.count()):
@@ -755,6 +778,12 @@ class AlignTab(QWidget):
                     self._row_list.item(i).text() in selected)
         else:
             self._select_all_rows()
+        self._update_row_count_label()
+
+    def _update_row_count_label(self):
+        total    = self._row_list.count()
+        selected = sum(1 for i in range(total) if self._row_list.item(i).isSelected())
+        self._row_count_lbl.setText(f"{selected} of {total} selected")
 
     def _select_all_rows(self):
         for i in range(self._row_list.count()):
