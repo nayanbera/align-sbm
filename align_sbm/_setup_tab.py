@@ -86,8 +86,8 @@ _SCAN_DEFAULTS = {
     "bpm_x_search_step":    10.0,
     "bpm_y_search_step":    0.001,
     "bpm_max_steps":        20,
-    "bpm_x_tolerance":      0.01,
-    "bpm_y_tolerance":      0.01,
+    "bpm_x_tolerance":      10.0,
+    "bpm_y_tolerance":      10.0,
     "bpm_refine_iter":      3,
     # Other
     "settle":           0.3,
@@ -513,15 +513,15 @@ class SetupTab(QWidget):
         self._scan_widgets["bpm_max_steps"] = w
         bpmsf.addRow("Max steps:", w)
 
-        w = _dbl(_SCAN_DEFAULTS["bpm_x_tolerance"], lo=1e-6, hi=100.0, decimals=5, step=0.001)
-        w.setToolTip("Target |BPMX| (mm): refinement passes stop when the X2 BPM reading is within this tolerance of zero")
+        w = _dbl(_SCAN_DEFAULTS["bpm_x_tolerance"], lo=0.1, hi=10000.0, decimals=1, step=1.0)
+        w.setToolTip("Target |BPMX| (μm): refinement passes stop when the X beam position is within this distance of zero")
         self._scan_widgets["bpm_x_tolerance"] = w
-        bpmsf.addRow("X2 tolerance (mm):", w)
+        bpmsf.addRow("BPMX tolerance (μm):", w)
 
-        w = _dbl(_SCAN_DEFAULTS["bpm_y_tolerance"], lo=1e-6, hi=100.0, decimals=5, step=0.001)
-        w.setToolTip("Target |BPMY| (mm): refinement passes stop when the Roll2 BPM reading is within this tolerance of zero")
+        w = _dbl(_SCAN_DEFAULTS["bpm_y_tolerance"], lo=0.1, hi=10000.0, decimals=1, step=1.0)
+        w.setToolTip("Target |BPMY| (μm): refinement passes stop when the Y beam position is within this distance of zero")
         self._scan_widgets["bpm_y_tolerance"] = w
-        bpmsf.addRow("Roll2 tolerance (mm):", w)
+        bpmsf.addRow("BPMY tolerance (μm):", w)
 
         w = _int(_SCAN_DEFAULTS["bpm_refine_iter"], lo=0, hi=10)
         w.setToolTip("Maximum number of extra refinement passes after the initial zero-crossing walk\n"
