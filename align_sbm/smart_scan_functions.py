@@ -3374,7 +3374,6 @@ def align_beamline(
                             if bpm_data_cb:
                                 bpm_data_cb("X2", pos, bpm, zp, _p)
 
-                        _tol_x_mm = bpm_x_tolerance / 1000.0
                         if verbose:
                             print(f"\n  j) X2 BPM scan  pass {_pass + 1}  "
                                   f"(step={bpm_x_search_step} μm, max={bpm_max_steps}, "
@@ -3397,13 +3396,13 @@ def align_beamline(
                             _cur_x = _cg_bpm(_bpm_x_pv, use_monitor=False)
                             if _cur_x is not None:
                                 _cur_x = float(_cur_x)
-                                if abs(_cur_x) <= _tol_x_mm:
+                                if abs(_cur_x) <= bpm_x_tolerance:
                                     if verbose:
-                                        print(f"    X2 BPM: |BPMX|={abs(_cur_x)*1000:.2f} μm ≤ "
+                                        print(f"    X2 BPM: |BPMX|={abs(_cur_x):.2f} μm ≤ "
                                               f"tol={bpm_x_tolerance} μm ✓")
                                     break
                                 elif _pass < int(bpm_refine_iter) and verbose:
-                                    print(f"    X2 BPM: |BPMX|={abs(_cur_x)*1000:.2f} μm > "
+                                    print(f"    X2 BPM: |BPMX|={abs(_cur_x):.2f} μm > "
                                           f"tol={bpm_x_tolerance} μm — refining")
                 else:
                     if verbose:
@@ -3463,7 +3462,6 @@ def align_beamline(
                             if bpm_data_cb:
                                 bpm_data_cb("Roll2", pos, bpm, zp, _p)
 
-                        _tol_y_mm = bpm_y_tolerance / 1000.0
                         if verbose:
                             print(f"\n  l) Roll2 BPM scan  pass {_pass + 1}  "
                                   f"(step={bpm_y_search_step} mdeg, max={bpm_max_steps}, "
@@ -3487,13 +3485,13 @@ def align_beamline(
                             _cur_y = _cg_bpm(_bpm_y_pv, use_monitor=False)
                             if _cur_y is not None:
                                 _cur_y = float(_cur_y)
-                                if abs(_cur_y) <= _tol_y_mm:
+                                if abs(_cur_y) <= bpm_y_tolerance:
                                     if verbose:
-                                        print(f"    Roll2 BPM: |BPMY|={abs(_cur_y)*1000:.2f} μm ≤ "
+                                        print(f"    Roll2 BPM: |BPMY|={abs(_cur_y):.2f} μm ≤ "
                                               f"tol={bpm_y_tolerance} μm ✓")
                                     break
                                 elif _pass < int(bpm_refine_iter) and verbose:
-                                    print(f"    Roll2 BPM: |BPMY|={abs(_cur_y)*1000:.2f} μm > "
+                                    print(f"    Roll2 BPM: |BPMY|={abs(_cur_y):.2f} μm > "
                                           f"tol={bpm_y_tolerance} μm — refining")
                 else:
                     if verbose:
