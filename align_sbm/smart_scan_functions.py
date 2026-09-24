@@ -3374,13 +3374,14 @@ def align_beamline(
                             if bpm_data_cb:
                                 bpm_data_cb("X2", pos, bpm, zp, _p)
 
+                        _x2_step = bpm_x_search_step / (2 ** _pass)
                         if verbose:
                             print(f"\n  j) X2 BPM scan  pass {_pass + 1}  "
-                                  f"(step={bpm_x_search_step} μm, max={bpm_max_steps}, "
+                                  f"(step={_x2_step:.4g} μm, max={bpm_max_steps}, "
                                   f"tol={bpm_x_tolerance} μm)")
                         x2_bpm_tgt, _ok_x, _ = _bpm_zero_scan(
                             x2_motor, _bpm_x_pv,
-                            search_step=bpm_x_search_step,
+                            search_step=_x2_step,
                             max_steps=bpm_max_steps,
                             correction_sign=-1,
                             settle=settle,
@@ -3462,13 +3463,14 @@ def align_beamline(
                             if bpm_data_cb:
                                 bpm_data_cb("Roll2", pos, bpm, zp, _p)
 
+                        _r2_step = bpm_y_search_step / (2 ** _pass)
                         if verbose:
                             print(f"\n  l) Roll2 BPM scan  pass {_pass + 1}  "
-                                  f"(step={bpm_y_search_step} mdeg, max={bpm_max_steps}, "
+                                  f"(step={_r2_step:.4g} mdeg, max={bpm_max_steps}, "
                                   f"tol={bpm_y_tolerance} μm)")
                         roll2_bpm_tgt, _ok_y, _ = _bpm_zero_scan(
                             roll2_motor, _bpm_y_pv,
-                            search_step=bpm_y_search_step,
+                            search_step=_r2_step,
                             max_steps=bpm_max_steps,
                             correction_sign=+1,
                             settle=settle,
