@@ -164,6 +164,7 @@ _FINE_POINT_COLOR = "#66bb6a"   # fine scan points (green)
 _FIT_COLOR        = "#ef5350"
 _PEAK_COLOR       = "#ffa726"
 _BG_COLOR    = "#1a1a2e"
+_BPM_PASS_COLORS = ["#FF8C00", "#00CED1", "#32CD32", "#FF69B4", "#9370DB"]
 
 _RES_COLS    = ["#", "MonoE (keV)", "BRG2 ctr", "Roll2 RBV", "X2 RBV", "OK"]
 
@@ -590,6 +591,11 @@ class AlignTab(QWidget):
         self._peak_lines:       dict = {}
         self._param_items:      dict = {}
 
+        # BPM walk plot items (populated in _build_right_panel)
+        self._bpm_plot_widgets: dict = {}   # "X2"/"Roll2" -> PlotWidget
+        self._bpm_curves:       dict = {}   # "X2"/"Roll2" -> [plot items]
+        self._bpm_tab_indices:  dict = {}   # "BPM-X2"/"BPM-Roll2" -> tab index
+
         # Demo animation state
         self._demo_timer   = None
         self._demo_pts     = []
@@ -897,6 +903,30 @@ class AlignTab(QWidget):
                 self._param_items[name]     = param_item
 
                 self._plot_tabs.addTab(pw, name)
+
+            # ── BPM walk plot tabs ─────────────────────────────────────────────
+            for bpm_motor, x_label in [("X2", "X2 position (μm)"),
+                                        ("Roll2", "Roll2 position (mdeg)")]:
+                tab_name = f"BPM-{bpm_motor}"
+                pw = pg.PlotWidget()
+                pw.setBackground(_BG_COLOR)
+                pw.setLabel("bottom", x_label)
+                pw.setLabel("left", "BPM (mm)")
+                pw.showGrid(x=True, y=True, alpha=0.25)
+                pw.setMinimumHeight(200)
+                pw.setTitle(f"{bpm_motor} BPM walk")
+
+                zero_hline = pg.InfiniteLine(
+                    pos=0.0, angle=0, movable=False,
+                    pen=pg.mkPen("#666666", width=1,
+                                 style=Qt.PenStyle.DashLine),
+                )
+                pw.addItem(zero_hline)
+
+                self._bpm_plot_widgets[bpm_motor] = pw
+                self._bpm_curves[bpm_motor] = []
+                idx = self._plot_tabs.addTab(pw, tab_name)
+                self._bpm_tab_indices[tab_name] = idx
 
             right_split.addWidget(self._plot_tabs)
         else:
@@ -1595,6 +1625,7 @@ class AlignTab(QWidget):
         self._worker.error.connect(self._on_error)
         self._worker.hold_triggered.connect(self._on_hold_triggered)
         self._worker.hold_cleared.connect(self._on_hold_cleared)
+        self._worker.bpm_scan_data.connect(self._on_bpm_scan_data)
 
         self._start_btn.setEnabled(False)
         self._abort_btn.setEnabled(True)
@@ -1602,6 +1633,12 @@ class AlignTab(QWidget):
         self._per_e_edit.setEnabled(False)
         self._progress.setRange(0, 0)
         self._progress.setVisible(True)
+        if _PG:
+            for motor, pw in self._bpm_plot_widgets.items():
+                for item in self._bpm_curves.get(motor, []):
+                    pw.removeItem(item)
+                self._bpm_curves[motor] = []
+                pw.setTitle(f"{motor} BPM walk")
         iter_str = ""
         if self._loop_active:
             total = str(self._loop_max) if self._loop_max > 0 else "∞"
@@ -1812,6 +1849,54 @@ class AlignTab(QWidget):
             self._draw_fit(tab, result)
         if tab in self._plot_widgets:
             self._plot_widgets[tab].setTitle(f"{tab} — {status_str}")
+
+    def _on_bpm_scan_data(self, data: dict):
+        """Plot a BPM walk pass on the corresponding BPM tab."""
+        if not _PG:
+            return
+        import math
+        motor     = data.get("motor", "")          # "X2" or "Roll2"
+        positions = data.get("positions", [])
+        bpm_vals  = data.get("bpm_values", [])
+        zero_pos  = data.get("zero_pos", float("nan"))
+        pass_idx  = data.get("pass_idx", 0)
+
+        pw = self._bpm_plot_widgets.get(motor)
+        if pw is None or not positions:
+            return
+
+        # On the first pass of a new scan, clear previous curves
+        if pass_idx == 0:
+            for item in self._bpm_curves.get(motor, []):
+                pw.removeItem(item)
+            self._bpm_curves[motor] = []
+
+        color = _BPM_PASS_COLORS[pass_idx % len(_BPM_PASS_COLORS)]
+        pen   = pg.mkPen(color, width=2)
+
+        curve = pw.plot(
+            positions, bpm_vals,
+            pen=pen,
+            symbol="o", symbolSize=7,
+            symbolBrush=pg.mkBrush(color),
+            symbolPen=pg.mkPen(color),
+        )
+        self._bpm_curves[motor].append(curve)
+
+        if not math.isnan(zero_pos):
+            vline = pg.InfiniteLine(
+                pos=zero_pos, angle=90, movable=False,
+                pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine),
+            )
+            pw.addItem(vline)
+            self._bpm_curves[motor].append(vline)
+
+        pw.enableAutoRange()
+        pw.setTitle(f"{motor} BPM walk — pass {pass_idx + 1}")
+
+        tab_name = f"BPM-{motor}"
+        if tab_name in self._bpm_tab_indices:
+            self._plot_tabs.setCurrentIndex(self._bpm_tab_indices[tab_name])
 
     def _draw_fit(self, tab_name: str, result):
         if tab_name not in self._fit_items:

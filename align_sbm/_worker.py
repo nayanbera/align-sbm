@@ -20,6 +20,7 @@ class AlignWorker(QThread):
     error               = pyqtSignal(str)            # traceback string
     hold_triggered      = pyqtSignal(str)            # hold is active (msg)
     hold_cleared        = pyqtSignal()               # hold lifted
+    bpm_scan_data       = pyqtSignal(dict)           # BPM walk data for plotting
 
     def __init__(self, table, kwargs, simulate, parent=None):
         super().__init__(parent)
@@ -107,10 +108,9 @@ class AlignWorker(QThread):
             )
             self.scan_finished.emit(result)
         elif kind == "step":
-            steps_per_row  = 11 if self._kwargs.get("do_pitch_scan", True) else 8
-            global_current = row_idx * steps_per_row + msg[2]
-            global_total   = n_total * steps_per_row
-            self.step_update.emit(msg[1], global_current, global_total)
+            self.step_update.emit(msg[1], msg[2], msg[3])
+        elif kind == "bpm_scan_data":
+            self.bpm_scan_data.emit(msg[1])
         elif kind == "error":
             self.error.emit(msg[1])
 

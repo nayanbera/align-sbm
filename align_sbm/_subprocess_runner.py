@@ -155,6 +155,15 @@ def run_alignment_row(q, row, kwargs, simulate):
     def _row_cb(record):
         q.put(("row_done", dict(record)))
 
+    def _bpm_data_cb(motor_name, positions, bpm_values, zero_pos, pass_idx):
+        q.put(("bpm_scan_data", {
+            "motor":      motor_name,
+            "positions":  list(positions),
+            "bpm_values": list(bpm_values),
+            "zero_pos":   float(zero_pos),
+            "pass_idx":   int(pass_idx),
+        }))
+
     # ── run ──────────────────────────────────────────────────────────────────
     try:
         with contextlib.redirect_stdout(_QStream()):
@@ -165,6 +174,7 @@ def run_alignment_row(q, row, kwargs, simulate):
                 debug=False,
                 step_cb=_step_cb,
                 row_cb=_row_cb,
+                bpm_data_cb=_bpm_data_cb,
                 **kwargs,
             )
     except Exception:

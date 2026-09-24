@@ -2651,11 +2651,12 @@ def _set_energy_for_row(mono_e, table, mono_e_pv, harmonic_pv, und_e_pv,
 
 
 def _bpm_zero_scan(motor_pv, bpm_pv, search_step, max_steps, correction_sign,
-                   settle=0.5, log_fn=print, motor_name=""):
+                   settle=0.5, log_fn=print, motor_name="", data_cb=None):
     """Walk a motor until the BPM signal crosses zero, then interpolate the exact position.
 
     correction_sign: -1 for X2/BPMX (motor moves opposite to BPM sign),
                      +1 for Roll2/BPMY (motor moves same direction as BPM sign).
+    data_cb: optional callable(positions, bpm_values, zero_pos) called when walk finishes.
     Returns (target_pos, success, final_bpm).  Does NOT move to target_pos — caller does.
     """
     try:
@@ -2673,8 +2674,12 @@ def _bpm_zero_scan(motor_pv, bpm_pv, search_step, max_steps, correction_sign,
     cur_raw = _cg(motor_pv + ".RBV", use_monitor=False)
     prev_pos = float(cur_raw if cur_raw is not None else 0.0)
 
+    positions = [prev_pos]
+    bpm_vals  = [f_a]
+
     if abs(f_a) < 1e-9:
         log_fn(f"[BPM] {motor_name}: already at zero ({f_a:.4g})\n")
+        if data_cb: data_cb(positions, bpm_vals, prev_pos)
         return (prev_pos, True, f_a)
 
     step = correction_sign * np.sign(f_a) * abs(search_step)
@@ -2690,18 +2695,23 @@ def _bpm_zero_scan(motor_pv, bpm_pv, search_step, max_steps, correction_sign,
             log_fn(f"[BPM] {motor_name}: lost BPM readback at step {i + 1}\n")
             break
         nxt_bpm = float(fb_raw)
+        positions.append(nxt)
+        bpm_vals.append(nxt_bpm)
         log_fn(f"[BPM] {motor_name}: step {i + 1}: pos={nxt:.4g}, BPM={nxt_bpm:.4g}\n")
 
         if prev_bpm * nxt_bpm <= 0:
             if abs(nxt_bpm) < 1e-9:
+                if data_cb: data_cb(positions, bpm_vals, nxt)
                 return (nxt, True, nxt_bpm)
             target = prev_pos + (0.0 - prev_bpm) * (nxt - prev_pos) / (nxt_bpm - prev_bpm)
             log_fn(f"[BPM] {motor_name}: zero crossing → target={target:.4g}\n")
+            if data_cb: data_cb(positions, bpm_vals, target)
             return (target, True, 0.0)
 
         prev_pos, prev_bpm = nxt, nxt_bpm
 
     log_fn(f"[BPM] {motor_name}: no zero crossing after {max_steps} steps (BPM={prev_bpm:.4g})\n")
+    if data_cb: data_cb(positions, bpm_vals, float("nan"))
     return (prev_pos, False, prev_bpm)
 
 
@@ -2783,6 +2793,10 @@ def align_beamline(
     bpm_y_search_step   : float = 0.001,
     bpm_max_steps       : int   = 20,
     bpm_slit_open       : float = 10.0,
+    bpm_x_tolerance     : float = 0.01,
+    bpm_y_tolerance     : float = 0.01,
+    bpm_refine_iter     : int   = 3,
+    bpm_data_cb                 = None,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -3334,30 +3348,57 @@ def align_beamline(
             time.sleep(5.0)
             if step_cb: step_cb("BPM open slits")
 
-            # ── j) X2 BPM zero scan ────────────────────────────────────────────
+            # ── j) X2 BPM zero scan (with tolerance-based refinement) ──────────
             x2_bpm_pos = float("nan")
             if _bpm_x_pv:
                 if not simulate:
-                    if verbose:
-                        print(f"\n  j) X2 BPM scan  "
-                              f"(step={bpm_x_search_step} μm, max={bpm_max_steps})")
-                    x2_bpm_tgt, _ok_x, _ = _bpm_zero_scan(
-                        x2_motor, _bpm_x_pv,
-                        search_step=bpm_x_search_step,
-                        max_steps=bpm_max_steps,
-                        correction_sign=-1,
-                        settle=settle,
-                        log_fn=_bpm_log,
-                        motor_name="X2",
-                    )
-                    if _ok_x and not np.isnan(x2_bpm_tgt):
-                        _write_pv(x2_motor, x2_bpm_tgt, f"X2 → {x2_bpm_tgt:.4g}")
-                        time.sleep(settle)
-                    x2_bpm_pos = _read_pv(x2_motor)
+                    try:
+                        from epics import caget as _cg_bpm
+                    except ImportError:
+                        _cg_bpm = None
+                    for _pass in range(int(bpm_refine_iter) + 1):
+                        _p = _pass
+
+                        def _x2_dcb(pos, bpm, zp, _p=_p):
+                            if bpm_data_cb:
+                                bpm_data_cb("X2", pos, bpm, zp, _p)
+
+                        if verbose:
+                            print(f"\n  j) X2 BPM scan  pass {_pass + 1}  "
+                                  f"(step={bpm_x_search_step} μm, max={bpm_max_steps}, "
+                                  f"tol={bpm_x_tolerance})")
+                        x2_bpm_tgt, _ok_x, _ = _bpm_zero_scan(
+                            x2_motor, _bpm_x_pv,
+                            search_step=bpm_x_search_step,
+                            max_steps=bpm_max_steps,
+                            correction_sign=-1,
+                            settle=settle,
+                            log_fn=_bpm_log,
+                            motor_name="X2",
+                            data_cb=_x2_dcb,
+                        )
+                        if _ok_x and not np.isnan(x2_bpm_tgt):
+                            _write_pv(x2_motor, x2_bpm_tgt, f"X2 → {x2_bpm_tgt:.4g}")
+                            time.sleep(settle)
+                        x2_bpm_pos = _read_pv(x2_motor)
+                        if _cg_bpm is not None:
+                            _cur_x = _cg_bpm(_bpm_x_pv, use_monitor=False)
+                            if _cur_x is not None:
+                                _cur_x = float(_cur_x)
+                                if abs(_cur_x) <= bpm_x_tolerance:
+                                    if verbose:
+                                        print(f"    X2 BPM: |BPMX|={abs(_cur_x):.4g} ≤ "
+                                              f"tol={bpm_x_tolerance} ✓")
+                                    break
+                                elif _pass < int(bpm_refine_iter) and verbose:
+                                    print(f"    X2 BPM: |BPMX|={abs(_cur_x):.4g} > "
+                                          f"tol={bpm_x_tolerance} — refining")
                 else:
                     if verbose:
                         print(f"\n  j) [SIM] X2 BPM scan skipped")
                     x2_bpm_pos = record.get("X2", float("nan"))
+                    if bpm_data_cb:
+                        bpm_data_cb("X2", [x2_bpm_pos], [0.0], x2_bpm_pos, 0)
                 if step_cb: step_cb("X2 BPM scan")
 
             # ── k) BRG2 fine rescan ────────────────────────────────────────────
@@ -3395,31 +3436,58 @@ def align_beamline(
                     print(f"    [SIM] BRG2 BPM rescan skipped")
             if step_cb: step_cb("BRG2 BPM rescan")
 
-            # ── l) Roll2 BPM zero scan ─────────────────────────────────────────
+            # ── l) Roll2 BPM zero scan (with tolerance-based refinement) ────────
             roll2_bpm_pos = float("nan")
             if _bpm_y_pv:
                 if not simulate:
-                    if verbose:
-                        print(f"\n  l) Roll2 BPM scan  "
-                              f"(step={bpm_y_search_step} mdeg, max={bpm_max_steps})")
-                    roll2_bpm_tgt, _ok_y, _ = _bpm_zero_scan(
-                        roll2_motor, _bpm_y_pv,
-                        search_step=bpm_y_search_step,
-                        max_steps=bpm_max_steps,
-                        correction_sign=+1,
-                        settle=settle,
-                        log_fn=_bpm_log,
-                        motor_name="Roll2",
-                    )
-                    if _ok_y and not np.isnan(roll2_bpm_tgt):
-                        _write_pv(roll2_motor, roll2_bpm_tgt,
-                                  f"Roll2 → {roll2_bpm_tgt:.4g}")
-                        time.sleep(settle)
-                    roll2_bpm_pos = _read_pv(roll2_motor)
+                    try:
+                        from epics import caget as _cg_bpm
+                    except ImportError:
+                        _cg_bpm = None
+                    for _pass in range(int(bpm_refine_iter) + 1):
+                        _p = _pass
+
+                        def _r2_dcb(pos, bpm, zp, _p=_p):
+                            if bpm_data_cb:
+                                bpm_data_cb("Roll2", pos, bpm, zp, _p)
+
+                        if verbose:
+                            print(f"\n  l) Roll2 BPM scan  pass {_pass + 1}  "
+                                  f"(step={bpm_y_search_step} mdeg, max={bpm_max_steps}, "
+                                  f"tol={bpm_y_tolerance})")
+                        roll2_bpm_tgt, _ok_y, _ = _bpm_zero_scan(
+                            roll2_motor, _bpm_y_pv,
+                            search_step=bpm_y_search_step,
+                            max_steps=bpm_max_steps,
+                            correction_sign=+1,
+                            settle=settle,
+                            log_fn=_bpm_log,
+                            motor_name="Roll2",
+                            data_cb=_r2_dcb,
+                        )
+                        if _ok_y and not np.isnan(roll2_bpm_tgt):
+                            _write_pv(roll2_motor, roll2_bpm_tgt,
+                                      f"Roll2 → {roll2_bpm_tgt:.4g}")
+                            time.sleep(settle)
+                        roll2_bpm_pos = _read_pv(roll2_motor)
+                        if _cg_bpm is not None:
+                            _cur_y = _cg_bpm(_bpm_y_pv, use_monitor=False)
+                            if _cur_y is not None:
+                                _cur_y = float(_cur_y)
+                                if abs(_cur_y) <= bpm_y_tolerance:
+                                    if verbose:
+                                        print(f"    Roll2 BPM: |BPMY|={abs(_cur_y):.4g} ≤ "
+                                              f"tol={bpm_y_tolerance} ✓")
+                                    break
+                                elif _pass < int(bpm_refine_iter) and verbose:
+                                    print(f"    Roll2 BPM: |BPMY|={abs(_cur_y):.4g} > "
+                                          f"tol={bpm_y_tolerance} — refining")
                 else:
                     if verbose:
                         print(f"\n  l) [SIM] Roll2 BPM scan skipped")
                     roll2_bpm_pos = record.get("Roll2", float("nan"))
+                    if bpm_data_cb:
+                        bpm_data_cb("Roll2", [roll2_bpm_pos], [0.0], roll2_bpm_pos, 0)
                 if step_cb: step_cb("Roll2 BPM scan")
 
             # ── m) Record BPM results and update the record ────────────────────

@@ -86,6 +86,9 @@ _SCAN_DEFAULTS = {
     "bpm_x_search_step":    10.0,
     "bpm_y_search_step":    0.001,
     "bpm_max_steps":        20,
+    "bpm_x_tolerance":      0.01,
+    "bpm_y_tolerance":      0.01,
+    "bpm_refine_iter":      3,
     # Other
     "settle":           0.3,
     "energy_settle":    2.0,
@@ -509,6 +512,22 @@ class SetupTab(QWidget):
         w.setToolTip("Maximum steps to walk before giving up on the zero-crossing search")
         self._scan_widgets["bpm_max_steps"] = w
         bpmsf.addRow("Max steps:", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_x_tolerance"], lo=1e-6, hi=100.0, decimals=5, step=0.001)
+        w.setToolTip("Target |BPMX| (mm): refinement passes stop when the X2 BPM reading is within this tolerance of zero")
+        self._scan_widgets["bpm_x_tolerance"] = w
+        bpmsf.addRow("X2 tolerance (mm):", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_y_tolerance"], lo=1e-6, hi=100.0, decimals=5, step=0.001)
+        w.setToolTip("Target |BPMY| (mm): refinement passes stop when the Roll2 BPM reading is within this tolerance of zero")
+        self._scan_widgets["bpm_y_tolerance"] = w
+        bpmsf.addRow("Roll2 tolerance (mm):", w)
+
+        w = _int(_SCAN_DEFAULTS["bpm_refine_iter"], lo=0, hi=10)
+        w.setToolTip("Maximum number of extra refinement passes after the initial zero-crossing walk\n"
+                     "Set to 0 to disable refinement (single pass only)")
+        self._scan_widgets["bpm_refine_iter"] = w
+        bpmsf.addRow("Max refine passes:", w)
 
         vbox.addWidget(bpm_scan_grp)
 
