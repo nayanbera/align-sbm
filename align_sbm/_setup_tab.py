@@ -81,6 +81,11 @@ _SCAN_DEFAULTS = {
     "fine_nsteps":     21,
     "fine_scan_iter":   2,
     "dmov_delay":       0.25,
+    # BPM alignment phase
+    "bpm_slit_open":        10.0,
+    "bpm_x_search_step":    10.0,
+    "bpm_y_search_step":    0.001,
+    "bpm_max_steps":        20,
     # Other
     "settle":           0.3,
     "energy_settle":    2.0,
@@ -472,6 +477,40 @@ class SetupTab(QWidget):
             "Increase if the motor record takes time to clear DMOV (typical: 0.2–0.5 s)."
         )
         vbox.addWidget(fine_grp)
+
+        # BPM Alignment parameters
+        bpm_scan_grp = QGroupBox("BPM Alignment Parameters")
+        bpm_scan_grp.setToolTip(
+            "Parameters for the optional BPM position alignment phase.\n"
+            "Enable it per-run via the 'Enable BPM alignment' checkbox on the Alignment tab.\n"
+            "BPM X and BPM Y readback PVs are set in the Motors & PVs tab."
+        )
+        bpmsf = QFormLayout(bpm_scan_grp)
+        bpmsf.setFieldGrowthPolicy(_stay)
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_slit_open"], lo=0.001, hi=100.0, decimals=3, step=1.0)
+        w.setToolTip("Slit opening (mm) for BPM phase — both V and H")
+        self._scan_widgets["bpm_slit_open"] = w
+        bpmsf.addRow("Slit open (mm):", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_x_search_step"], lo=0.001, hi=10000.0, decimals=3, step=1.0)
+        w.setToolTip("X2 step size (μm) for the BPMX zero-crossing walk\n"
+                     "BPMX > 0 → X2 moves negative; BPMX < 0 → X2 moves positive")
+        self._scan_widgets["bpm_x_search_step"] = w
+        bpmsf.addRow("X2 step (μm):", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_y_search_step"], lo=1e-6, hi=1.0, decimals=5, step=0.0001)
+        w.setToolTip("Roll2 step size (mdeg) for the BPMY zero-crossing walk\n"
+                     "BPMY > 0 → Roll2 moves positive; BPMY < 0 → Roll2 moves negative")
+        self._scan_widgets["bpm_y_search_step"] = w
+        bpmsf.addRow("Roll2 step (mdeg):", w)
+
+        w = _int(_SCAN_DEFAULTS["bpm_max_steps"], lo=2, hi=200)
+        w.setToolTip("Maximum steps to walk before giving up on the zero-crossing search")
+        self._scan_widgets["bpm_max_steps"] = w
+        bpmsf.addRow("Max steps:", w)
+
+        vbox.addWidget(bpm_scan_grp)
 
         # Other
         other_grp = QGroupBox("Other Parameters")
