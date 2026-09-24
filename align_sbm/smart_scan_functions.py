@@ -2797,6 +2797,13 @@ def align_beamline(
     bpm_y_tolerance     : float = 10.0,
     bpm_refine_iter     : int   = 3,
     bpm_data_cb                 = None,
+    slit_v_center_pv    : str   = "",
+    slit_v_top_pv       : str   = "",
+    slit_v_bot_pv       : str   = "",
+    bpm_slit_v_gap      : float = 0.1,
+    bpm_slit_v_start    : float = -2.0,
+    bpm_slit_v_stop     : float = 2.0,
+    bpm_slit_v_nsteps   : int   = 21,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -2948,7 +2955,8 @@ def align_beamline(
     if record_pvs:
         fieldnames += list(record_pvs.keys())
     if bpm_align:
-        fieldnames += ["X2_bpm", "Roll2_bpm", "BRG2_bpm"]
+        fieldnames += ["X2_bpm", "Roll2_bpm", "BRG2_bpm",
+                       "slit_v_center_bpm", "slit_v_top_bpm", "slit_v_bot_bpm"]
 
     # Merge columns with any existing CSV rather than archiving it.
     # New columns (from added record_pvs) are appended; existing rows get "0".
@@ -3311,9 +3319,12 @@ def align_beamline(
                     print(f"    {label} ({lbl}) = {val:.6g}")
 
         record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        record["X2_bpm"]    = float("nan")
-        record["Roll2_bpm"] = float("nan")
-        record["BRG2_bpm"]  = float("nan")
+        record["X2_bpm"]           = float("nan")
+        record["Roll2_bpm"]        = float("nan")
+        record["BRG2_bpm"]         = float("nan")
+        record["slit_v_center_bpm"] = float("nan")
+        record["slit_v_top_bpm"]   = float("nan")
+        record["slit_v_bot_bpm"]   = float("nan")
         # When BPM phase is enabled, defer CSV write until after BPM steps
         if writer and not bpm_align:
             writer.writerow(record)
@@ -3492,17 +3503,64 @@ def align_beamline(
                         bpm_data_cb("Roll2", [roll2_bpm_pos], [0.0], roll2_bpm_pos, 0)
                 if step_cb: step_cb("Roll2 BPM scan")
 
-            # ── m) Record BPM results and update the record ────────────────────
+            # ── m) Record BPM results ──────────────────────────────────────────
             record["X2_bpm"]    = x2_bpm_pos
             record["Roll2_bpm"] = roll2_bpm_pos
             record["BRG2_bpm"]  = brg2_bpm_pos
-            record["datetime"]  = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if verbose:
                 print(f"\n  m) BPM results:  "
                       f"X2_bpm={x2_bpm_pos:.4g}  "
                       f"Roll2_bpm={roll2_bpm_pos:.4g}  "
                       f"BRG2_bpm={brg2_bpm_pos:.4g}")
             if step_cb: step_cb("Record BPM results")
+
+            # ── n) Slit V center scan ──────────────────────────────────────────
+            _slit_v_center = str(slit_v_center_pv or "").strip()
+            if _slit_v_center:
+                if verbose:
+                    print(f"\n  n) Slit V center scan  "
+                          f"[{bpm_slit_v_start:+g} … {bpm_slit_v_stop:+g}  "
+                          f"{bpm_slit_v_nsteps} steps]  gap={bpm_slit_v_gap} mm")
+                if not simulate:
+                    _write_pv(slit_v, bpm_slit_v_gap,
+                              f"slit_v → {bpm_slit_v_gap} mm (slit V scan)")
+                    time.sleep(settle)
+                    cur_center = _read_pv(_slit_v_center)
+                    r_slit_v = smart_scan(
+                        _slit_v_center, detector,
+                        start=cur_center + bpm_slit_v_start,
+                        stop=cur_center + bpm_slit_v_stop,
+                        nsteps=int(bpm_slit_v_nsteps),
+                        mode="max", settle=settle,
+                        det_update_interval=det_update_interval,
+                        fit_profile=fit_profile,
+                        peak_method=peak_method, stats_centre=stats_centre,
+                        move_to_peak=True, move_target="centroid",
+                        fine_scan=fine_scan, fine_sigma_range=fine_sigma_range,
+                        fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
+                        dmov_delay=dmov_delay,
+                        plot=plot,
+                        backlash_correction=backlash_correction,
+                        monitor_pv=monitor_pv,
+                        simulate=False, debug=not verbose,
+                    )
+                    if verbose:
+                        cen_str = (f"{r_slit_v.center:.6g}"
+                                   if r_slit_v.center is not None else "n/a")
+                        print(f"    Slit V: {r_slit_v.status.value}  peak={cen_str}")
+                    record["slit_v_center_bpm"] = _read_pv(_slit_v_center)
+                    _sv_top = str(slit_v_top_pv or "").strip()
+                    _sv_bot = str(slit_v_bot_pv or "").strip()
+                    if _sv_top:
+                        record["slit_v_top_bpm"] = _read_pv(_sv_top)
+                    if _sv_bot:
+                        record["slit_v_bot_bpm"] = _read_pv(_sv_bot)
+                else:
+                    if verbose:
+                        print(f"\n  n) [SIM] Slit V center scan skipped")
+                if step_cb: step_cb("Slit V scan")
+
+            record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Write CSV: after BPM phase if bpm_align, at step h otherwise
         if writer and bpm_align:

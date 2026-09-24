@@ -20,7 +20,7 @@ try:
 except ImportError:
     _PG = False
 
-_MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2"]
+_MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2", "Slit-V"]
 
 
 class _SortableItem(QTableWidgetItem):

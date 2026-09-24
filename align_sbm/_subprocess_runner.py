@@ -65,9 +65,10 @@ def run_alignment_row(q, row, kwargs, simulate):
 
     # ── motor PV → tab name ──────────────────────────────────────────────────
     _motor_tab = {
-        kwargs.get("brg2",        ""): "BRG2",
-        kwargs.get("roll2_motor", ""): "Roll2",
-        kwargs.get("x2_motor",    ""): "X2",
+        kwargs.get("brg2",             ""): "BRG2",
+        kwargs.get("roll2_motor",      ""): "Roll2",
+        kwargs.get("x2_motor",         ""): "X2",
+        kwargs.get("slit_v_center_pv", ""): "Slit-V",
     }
 
     def _tab_for(motor):
@@ -140,9 +141,14 @@ def run_alignment_row(q, row, kwargs, simulate):
 
     # ── callbacks ────────────────────────────────────────────────────────────
     do_pitch    = kwargs.get("do_pitch_scan", True)
-    _bpm_x_pv   = str(kwargs.get("bpm_x_pv") or "").strip()
-    _bpm_y_pv   = str(kwargs.get("bpm_y_pv") or "").strip()
-    bpm_steps   = (3 + (1 if _bpm_x_pv else 0) + (1 if _bpm_y_pv else 0)) if kwargs.get("bpm_align") else 0
+    _bpm_x_pv        = str(kwargs.get("bpm_x_pv")        or "").strip()
+    _bpm_y_pv        = str(kwargs.get("bpm_y_pv")        or "").strip()
+    _slit_v_ctr_pv   = str(kwargs.get("slit_v_center_pv") or "").strip()
+    bpm_steps   = (3
+                   + (1 if _bpm_x_pv      else 0)
+                   + (1 if _bpm_y_pv      else 0)
+                   + (1 if _slit_v_ctr_pv else 0)
+                  ) if kwargs.get("bpm_align") else 0
     total_steps = (11 if do_pitch else 9) + bpm_steps
     step_cnt    = [0]
 
