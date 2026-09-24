@@ -133,7 +133,9 @@ An eight-column table:
 | Crystal | Crystal name for this energy (free text, e.g. `Si 400`); used to enforce crystal matching before alignment or Move to Energy |
 | Updated | Timestamp of the last successful alignment at this energy; read-only |
 
-**Sorting:** Click any column header to sort by that column. Numeric columns sort by value; Crystal and Updated sort alphabetically. An arrow indicator shows the active sort column and direction.
+**Sorting:** Click any column header to sort by that column. Numeric columns (MonoE through Roll1) sort by value; Crystal and Updated sort alphabetically. An arrow indicator shows the active sort column and direction. Changing the sort order is immediately reflected in the Energy rows list on the Alignment tab.
+
+**Row colors:** Each row's background is automatically colored using the crystal's configured color (set via the Crystal Status **⚙** button on the Alignment tab). Colors update live when a Crystal cell is edited or when crystal color mappings are changed. Rows with no crystal set have no background color.
 
 **Buttons:**
 
@@ -173,9 +175,11 @@ This dialog fits Roll2 and X2 as a function of MonoE using the alignment history
 
 A color-coded chip shows the currently active crystal read from the configured EPICS PV. Click **⚙** to set the PV name and define raw-value → display-name + color mappings. The chip updates live via a CA monitor.
 
+Each crystal mapping has a configurable color. The color picker includes an **opacity/transparency slider** (alpha channel), so colors can be fully opaque or semi-transparent. The same color is used in the energy table row backgrounds, the energy row list items, and the crystal chip.
+
 **Energy rows to align**
 
-Multi-select list populated from the Energy Table. Each item is color-coded to match the crystal color configured in Crystal Status. A `"N of M selected"` count is shown above the list.
+Multi-select list populated from the Energy Table. Each item is color-coded to match its crystal's configured color. A `"N of M selected"` count is shown above the list.
 
 - Rows whose Crystal field is set to a **different** crystal than the current one are **grayed out and non-selectable** — they cannot be included in an alignment run until the crystal is switched.
 - Rows with no Crystal field set are always selectable.
@@ -226,13 +230,15 @@ On completion: fitted curve (red line), peak marker (dashed orange vertical line
 - **Add Column…** — add a new column to the CSV file backed by an EPICS PV.
 - The path of the last opened or written CSV is remembered and auto-loaded on next launch.
 
-**CSV color coding** — a **Color by:** selector and **Edit Rules…** button appear in the CSV tab header. Rules are evaluated against the chosen column and the first matching rule wins. Each rule has an Operator, Value(s), an optional Label, and a Color. Legend chips above the table show the active rules.
+**CSV color coding** — a **Color by:** selector and **Edit Rules…** button appear in the CSV tab header. Rules are evaluated against the chosen column and the first matching rule wins. Each rule has an Operator, Value(s), an optional Label, and a Color (with alpha/opacity support). Legend chips above the table show the active rules.
 
 #### Statistical Analysis Dialog
 
 Opened via **Analyze…** in the CSV tab.
 
 A **Date range** filter re-runs all plots, the report, and model training — only rows within the selected range are included.
+
+A **Crystal** filter combobox sits below the date range. It is populated automatically from the energy table's MonoE → crystal mapping (matched within 0.001 keV). Selecting a crystal limits all statistics, plots, drift analysis, correlation matrices, and model training to rows belonging to that crystal's energies. **All crystals** (default) shows everything. The combobox is disabled when no crystal information is available in the energy table.
 
 **Plots tab** — 3 × 2 matplotlib grid: Roll2/X2 time series, mean±std bar charts, Pearson correlation heatmap, Roll2 vs X2 scatter.
 
