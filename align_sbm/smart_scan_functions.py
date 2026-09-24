@@ -2715,6 +2715,146 @@ def _bpm_zero_scan(motor_pv, bpm_pv, search_step, max_steps, correction_sign,
     return (prev_pos, False, prev_bpm)
 
 
+def _slit_center_scan(
+    center_pv,
+    detector_pv,
+    start,
+    stop,
+    nsteps,
+    top_pv="",
+    bot_pv="",
+    settle=0.5,
+    dmov_timeout=30.0,
+    verbose=True,
+    simulate=False,
+    scan_cb=None,
+):
+    """Scan a virtual (plain read/write) slit center PV, using blade motor DMOV for settling.
+
+    Uses the scan setpoint as the position axis (no blade-to-center coordinate transform needed).
+    Calls scan_cb("started", "Slit-V"), scan_cb("point", pos, sig),
+    scan_cb("finished", result_dict) for live-plot integration.
+    Returns a SimpleNamespace(status, center, positions, signals).
+    """
+    from types import SimpleNamespace
+
+    positions = np.linspace(float(start), float(stop), max(int(nsteps), 2))
+    rec_pos = []
+    rec_sig = []
+
+    if scan_cb:
+        scan_cb("started", "Slit-V")
+
+    if not simulate and _EPICS_AVAILABLE:
+        try:
+            from epics import caget as _cg, caput as _cp
+        except ImportError:
+            scan_cb and scan_cb("finished", {
+                "status": ScanStatus.INSUFFICIENT_DATA.value,
+                "center": float("nan"), "sigma": float("nan"),
+                "amplitude": float("nan"), "offset": float("nan"),
+                "profile": [], "stats": {},
+            })
+            return SimpleNamespace(
+                status=ScanStatus.INSUFFICIENT_DATA,
+                center=float("nan"), positions=positions, signals=np.zeros_like(positions),
+            )
+
+        det_obj = epics.PV(detector_pv, auto_monitor=False)
+        det_obj.connect(timeout=5)
+        _top = top_pv.strip() if top_pv else ""
+        _bot = bot_pv.strip() if bot_pv else ""
+
+        for sp in positions:
+            # Move virtual center PV (soft setpoint — caput returns immediately)
+            _cp(center_pv, sp, wait=True, timeout=5)
+            time.sleep(0.1)  # let IOC propagate setpoint to blade motors
+
+            # Wait for both blade motors to finish moving
+            t0 = time.time()
+            while time.time() - t0 < dmov_timeout:
+                d1 = int(_cg(_top + ".DMOV", use_monitor=False) or 0) if _top else 1
+                d2 = int(_cg(_bot + ".DMOV", use_monitor=False) or 0) if _bot else 1
+                if d1 and d2:
+                    break
+                time.sleep(0.05)
+
+            time.sleep(settle)
+
+            sig_raw = det_obj.get(use_monitor=False)
+            sig = float(sig_raw) if sig_raw is not None else 0.0
+
+            rec_pos.append(sp)
+            rec_sig.append(sig)
+
+            if verbose:
+                print(f"    slit_center={sp:.4g}  signal={sig:.4g}")
+            if scan_cb:
+                scan_cb("point", sp, sig)
+    else:
+        sim_center = (float(start) + float(stop)) / 2.0
+        for sp in positions:
+            sig = 100.0 * np.exp(-0.5 * ((sp - sim_center) / 0.3) ** 2) + 10.0
+            rec_pos.append(sp)
+            rec_sig.append(sig)
+            if verbose:
+                print(f"    [SIM] slit_center={sp:.4g}  signal={sig:.4g}")
+            if scan_cb:
+                scan_cb("point", sp, sig)
+
+    pos_arr = np.array(rec_pos)
+    sig_arr = np.array(rec_sig)
+
+    # Centroid weighted by signal above baseline
+    baseline = sig_arr.min() if len(sig_arr) else 0.0
+    weights = np.clip(sig_arr - baseline, 0, None)
+    total_w = float(weights.sum())
+    if total_w > 0 and sig_arr.max() > baseline:
+        center = float(np.dot(pos_arr, weights) / total_w)
+        ok_status = ScanStatus.SUCCESS
+    else:
+        center = float(pos_arr[len(pos_arr) // 2])
+        ok_status = ScanStatus.NO_PEAK
+
+    result_dict = {
+        "status":    ok_status.value,
+        "center":    center,
+        "sigma":     float("nan"),
+        "amplitude": float(sig_arr.max()) if len(sig_arr) else float("nan"),
+        "offset":    float(baseline),
+        "profile":   list(zip(pos_arr.tolist(), sig_arr.tolist())),
+        "stats":     {},
+    }
+
+    # Move to peak if found
+    if ok_status is ScanStatus.SUCCESS and not simulate and _EPICS_AVAILABLE:
+        if verbose:
+            print(f"    Slit V peak at {center:.4g} — moving center PV")
+        from epics import caget as _cg, caput as _cp
+        _cp(center_pv, center, wait=True, timeout=5)
+        time.sleep(0.1)
+        _top = top_pv.strip() if top_pv else ""
+        _bot = bot_pv.strip() if bot_pv else ""
+        t0 = time.time()
+        while time.time() - t0 < dmov_timeout:
+            d1 = int(_cg(_top + ".DMOV", use_monitor=False) or 0) if _top else 1
+            d2 = int(_cg(_bot + ".DMOV", use_monitor=False) or 0) if _bot else 1
+            if d1 and d2:
+                break
+            time.sleep(0.05)
+        time.sleep(settle)
+
+    if scan_cb:
+        scan_cb("finished", result_dict)
+
+    return SimpleNamespace(
+        status=ok_status,
+        center=center,
+        positions=pos_arr,
+        signals=sig_arr,
+    )
+
+
 def align_beamline(
     table               : list,
     detector            = None,
@@ -2797,6 +2937,7 @@ def align_beamline(
     bpm_y_tolerance     : float = 10.0,
     bpm_refine_iter     : int   = 3,
     bpm_data_cb                 = None,
+    slit_scan_cb                = None,
     slit_v_center_pv    : str   = "",
     slit_v_top_pv       : str   = "",
     slit_v_bot_pv       : str   = "",
@@ -3517,6 +3658,8 @@ def align_beamline(
             # ── n) Slit V center scan ──────────────────────────────────────────
             _slit_v_center = str(slit_v_center_pv or "").strip()
             if _slit_v_center:
+                _sv_top = str(slit_v_top_pv or "").strip()
+                _sv_bot = str(slit_v_bot_pv or "").strip()
                 if verbose:
                     print(f"\n  n) Slit V center scan  "
                           f"[{bpm_slit_v_start:+g} … {bpm_slit_v_stop:+g}  "
@@ -3525,39 +3668,30 @@ def align_beamline(
                     _write_pv(slit_v, bpm_slit_v_gap,
                               f"slit_v → {bpm_slit_v_gap} mm (slit V scan)")
                     time.sleep(settle)
-                    cur_center = _read_pv(_slit_v_center)
-                    r_slit_v = smart_scan(
-                        _slit_v_center, detector,
-                        start=cur_center + bpm_slit_v_start,
-                        stop=cur_center + bpm_slit_v_stop,
-                        nsteps=int(bpm_slit_v_nsteps),
-                        mode="max", settle=settle,
-                        det_update_interval=det_update_interval,
-                        fit_profile=fit_profile,
-                        peak_method=peak_method, stats_centre=stats_centre,
-                        move_to_peak=True, move_target="centroid",
-                        fine_scan=fine_scan, fine_sigma_range=fine_sigma_range,
-                        fine_nsteps=fine_nsteps, fine_scan_iter=fine_scan_iter,
-                        dmov_delay=dmov_delay,
-                        plot=plot,
-                        backlash_correction=backlash_correction,
-                        monitor_pv=monitor_pv,
-                        simulate=False, debug=not verbose,
-                    )
-                    if verbose:
-                        cen_str = (f"{r_slit_v.center:.6g}"
-                                   if r_slit_v.center is not None else "n/a")
-                        print(f"    Slit V: {r_slit_v.status.value}  peak={cen_str}")
+                cur_center = _read_pv(_slit_v_center) if not simulate else 0.0
+                r_slit_v = _slit_center_scan(
+                    center_pv=_slit_v_center,
+                    detector_pv=detector,
+                    start=cur_center + bpm_slit_v_start,
+                    stop=cur_center + bpm_slit_v_stop,
+                    nsteps=int(bpm_slit_v_nsteps),
+                    top_pv=_sv_top,
+                    bot_pv=_sv_bot,
+                    settle=settle,
+                    verbose=verbose,
+                    simulate=simulate,
+                    scan_cb=slit_scan_cb,
+                )
+                if verbose:
+                    cen_str = (f"{r_slit_v.center:.6g}"
+                               if r_slit_v.center is not None else "n/a")
+                    print(f"    Slit V: {r_slit_v.status.value}  peak={cen_str}")
+                if not simulate:
                     record["slit_v_center_bpm"] = _read_pv(_slit_v_center)
-                    _sv_top = str(slit_v_top_pv or "").strip()
-                    _sv_bot = str(slit_v_bot_pv or "").strip()
                     if _sv_top:
-                        record["slit_v_top_bpm"] = _read_pv(_sv_top)
+                        record["slit_v_top_bpm"] = _read_pv(_sv_top + ".RBV")
                     if _sv_bot:
-                        record["slit_v_bot_bpm"] = _read_pv(_sv_bot)
-                else:
-                    if verbose:
-                        print(f"\n  n) [SIM] Slit V center scan skipped")
+                        record["slit_v_bot_bpm"] = _read_pv(_sv_bot + ".RBV")
                 if step_cb: step_cb("Slit V scan")
 
             record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -170,6 +170,14 @@ def run_alignment_row(q, row, kwargs, simulate):
             "pass_idx":   int(pass_idx),
         }))
 
+    def _slit_scan_cb(event, *args):
+        if event == "started":
+            q.put(("scan_started", args[0]))   # args[0] == "Slit-V"
+        elif event == "point":
+            q.put(("point", float(args[0]), float(args[1])))
+        elif event == "finished":
+            q.put(("scan_finished", args[0]))  # args[0] == result_dict
+
     # ── run ──────────────────────────────────────────────────────────────────
     try:
         with contextlib.redirect_stdout(_QStream()):
@@ -181,6 +189,7 @@ def run_alignment_row(q, row, kwargs, simulate):
                 step_cb=_step_cb,
                 row_cb=_row_cb,
                 bpm_data_cb=_bpm_data_cb,
+                slit_scan_cb=_slit_scan_cb,
                 **kwargs,
             )
     except Exception:
