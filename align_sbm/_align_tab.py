@@ -1721,11 +1721,14 @@ class AlignTab(QWidget):
     # ── Worker signal handlers ────────────────────────────────────────────────
 
     def _on_log(self, text):
+        sb = self._log.verticalScrollBar()
+        at_bottom = sb.value() >= sb.maximum() - 20
         cursor = self._log.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         cursor.insertText(text)
-        self._log.setTextCursor(cursor)
-        self._log.ensureCursorVisible()
+        if at_bottom:
+            self._log.setTextCursor(cursor)
+            self._log.ensureCursorVisible()
 
     def _on_step_update(self, label: str, current: int, total: int):
         self._progress.setRange(0, total)
