@@ -140,7 +140,8 @@ def run_alignment_row(q, row, kwargs, simulate):
 
     # ── callbacks ────────────────────────────────────────────────────────────
     do_pitch    = kwargs.get("do_pitch_scan", True)
-    total_steps = 11 if do_pitch else 8
+    bpm_steps   = 5 if kwargs.get("bpm_align") else 0
+    total_steps = (11 if do_pitch else 8) + bpm_steps
     step_cnt    = [0]
 
     def _step_cb(label):

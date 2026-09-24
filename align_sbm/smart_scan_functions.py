@@ -2650,6 +2650,61 @@ def _set_energy_for_row(mono_e, table, mono_e_pv, harmonic_pv, und_e_pv,
                                 pre_energy_pvs=pre_energy_pvs, post_energy_pvs=post_energy_pvs)
 
 
+def _bpm_zero_scan(motor_pv, bpm_pv, search_step, max_steps, correction_sign,
+                   settle=0.5, log_fn=print, motor_name=""):
+    """Walk a motor until the BPM signal crosses zero, then interpolate the exact position.
+
+    correction_sign: -1 for X2/BPMX (motor moves opposite to BPM sign),
+                     +1 for Roll2/BPMY (motor moves same direction as BPM sign).
+    Returns (target_pos, success, final_bpm).  Does NOT move to target_pos — caller does.
+    """
+    try:
+        from epics import caget as _cg, caput as _cp
+    except ImportError:
+        log_fn(f"[BPM] pyepics unavailable — skipping {motor_name}\n")
+        return (float("nan"), False, float("nan"))
+
+    f_a_raw = _cg(bpm_pv, use_monitor=False)
+    if f_a_raw is None:
+        log_fn(f"[BPM] Cannot read {bpm_pv} — skipping {motor_name}\n")
+        return (float("nan"), False, float("nan"))
+    f_a = float(f_a_raw)
+
+    cur_raw = _cg(motor_pv + ".RBV", use_monitor=False)
+    prev_pos = float(cur_raw if cur_raw is not None else 0.0)
+
+    if abs(f_a) < 1e-9:
+        log_fn(f"[BPM] {motor_name}: already at zero ({f_a:.4g})\n")
+        return (prev_pos, True, f_a)
+
+    step = correction_sign * np.sign(f_a) * abs(search_step)
+    log_fn(f"[BPM] {motor_name}: BPM={f_a:.4g}, step={step:+.4g}, max_steps={max_steps}\n")
+
+    prev_bpm = f_a
+    for i in range(max_steps):
+        nxt = prev_pos + step
+        _cp(motor_pv, nxt, wait=True)
+        time.sleep(settle)
+        fb_raw = _cg(bpm_pv, use_monitor=False)
+        if fb_raw is None:
+            log_fn(f"[BPM] {motor_name}: lost BPM readback at step {i + 1}\n")
+            break
+        nxt_bpm = float(fb_raw)
+        log_fn(f"[BPM] {motor_name}: step {i + 1}: pos={nxt:.4g}, BPM={nxt_bpm:.4g}\n")
+
+        if prev_bpm * nxt_bpm <= 0:
+            if abs(nxt_bpm) < 1e-9:
+                return (nxt, True, nxt_bpm)
+            target = prev_pos + (0.0 - prev_bpm) * (nxt - prev_pos) / (nxt_bpm - prev_bpm)
+            log_fn(f"[BPM] {motor_name}: zero crossing → target={target:.4g}\n")
+            return (target, True, 0.0)
+
+        prev_pos, prev_bpm = nxt, nxt_bpm
+
+    log_fn(f"[BPM] {motor_name}: no zero crossing after {max_steps} steps (BPM={prev_bpm:.4g})\n")
+    return (prev_pos, False, prev_bpm)
+
+
 def align_beamline(
     table               : list,
     detector            = None,
@@ -2721,6 +2776,13 @@ def align_beamline(
     pre_energy_pvs      : list  = None,
     post_energy_pvs     : list  = None,
     roll1_motor         : str   = None,
+    bpm_align           : bool  = False,
+    bpm_x_pv            : str   = "",
+    bpm_y_pv            : str   = "",
+    bpm_x_search_step   : float = 10.0,
+    bpm_y_search_step   : float = 0.001,
+    bpm_max_steps       : int   = 20,
+    bpm_slit_open       : float = 10.0,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -2739,7 +2801,9 @@ def align_beamline(
 
     CSV columns (in order):
       datetime | MonoE | Harmonic | UndE | Roll2 | X2 | <record_pvs keys>
+      [X2_bpm | Roll2_bpm | BRG2_bpm]  (only when bpm_align=True)
     Roll2 and X2 are the actual post-scan RBV values, not nominal table values.
+    *_bpm columns are the positions after the optional BPM position alignment phase.
     """
     if debug:
         verbose = False
@@ -2869,6 +2933,8 @@ def align_beamline(
     fieldnames = ["datetime", "MonoE", "Harmonic", "UndE", "Roll2", "X2"]
     if record_pvs:
         fieldnames += list(record_pvs.keys())
+    if bpm_align:
+        fieldnames += ["X2_bpm", "Roll2_bpm", "BRG2_bpm"]
 
     # Merge columns with any existing CSV rather than archiving it.
     # New columns (from added record_pvs) are appended; existing rows get "0".
@@ -3232,7 +3298,11 @@ def align_beamline(
                     print(f"    {label} ({lbl}) = {val:.6g}")
 
         record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if writer:
+        record["X2_bpm"]    = float("nan")
+        record["Roll2_bpm"] = float("nan")
+        record["BRG2_bpm"]  = float("nan")
+        # When BPM phase is enabled, defer CSV write until after BPM steps
+        if writer and not bpm_align:
             writer.writerow(record)
             csv_file.flush()
         record["_brg2_center"]  = r_brg2.center  if r_brg2  and r_brg2.center  is not None else float("nan")
@@ -3240,7 +3310,134 @@ def align_beamline(
         record["_x2_center"]   = r_x2.center    if r_x2    and r_x2.center    is not None else float("nan")
         record["_row_ok"]      = _row_ok
         results.append(record)
-        if row_cb: row_cb(record)
+        if row_cb: row_cb(record)   # GUI update: Roll2/X2 from main alignment
+
+        # ── BPM alignment phase (optional) ────────────────────────────────────
+        if bpm_align:
+            _bpm_x_pv = str(bpm_x_pv or "").strip()
+            _bpm_y_pv = str(bpm_y_pv or "").strip()
+
+            def _bpm_log(msg):
+                if verbose:
+                    print(msg, end="")
+
+            if verbose:
+                print(f"\n  {'─'*56}")
+                print(f"  BPM alignment phase")
+                print(f"  {'─'*56}")
+
+            # ── i) Open slits to bpm_slit_open × bpm_slit_open ───────────────
+            if step_cb: step_cb("BPM open slits")
+            if verbose:
+                print(f"\n  i) Opening slits: V={bpm_slit_open}  H={bpm_slit_open}")
+            _write_pv(slit_v, bpm_slit_open, f"slit_v → {bpm_slit_open}")
+            _write_pv(slit_h, bpm_slit_open, f"slit_h → {bpm_slit_open}")
+            time.sleep(5.0)
+
+            # ── j) X2 BPM zero scan ────────────────────────────────────────────
+            x2_bpm_pos = float("nan")
+            if _bpm_x_pv:
+                if step_cb: step_cb("X2 BPM scan")
+                if not simulate:
+                    if verbose:
+                        print(f"\n  j) X2 BPM scan  "
+                              f"(step={bpm_x_search_step} μm, max={bpm_max_steps})")
+                    x2_bpm_tgt, _ok_x, _ = _bpm_zero_scan(
+                        x2_motor, _bpm_x_pv,
+                        search_step=bpm_x_search_step,
+                        max_steps=bpm_max_steps,
+                        correction_sign=-1,
+                        settle=settle,
+                        log_fn=_bpm_log,
+                        motor_name="X2",
+                    )
+                    if _ok_x and not np.isnan(x2_bpm_tgt):
+                        _write_pv(x2_motor, x2_bpm_tgt, f"X2 → {x2_bpm_tgt:.4g}")
+                        time.sleep(settle)
+                    x2_bpm_pos = _read_pv(x2_motor)
+                else:
+                    if verbose:
+                        print(f"\n  j) [SIM] X2 BPM scan skipped")
+                    x2_bpm_pos = record.get("X2", float("nan"))
+
+            # ── k) BRG2 fine rescan ────────────────────────────────────────────
+            brg2_bpm_pos = float("nan")
+            if step_cb: step_cb("BRG2 BPM rescan")
+            if verbose:
+                print(f"\n  k) BRG2 BPM fine rescan")
+            if not simulate:
+                if r_brg2 is not None and r_brg2.sigma and not np.isnan(r_brg2.sigma):
+                    _half = fine_sigma_range * r_brg2.sigma
+                else:
+                    _half = max(abs(brg2_start), abs(brg2_stop))
+                r_brg2_bpm = smart_scan(
+                    brg2, detector,
+                    start=-_half, stop=_half, nsteps=fine_nsteps,
+                    mode="max", settle=settle,
+                    det_update_interval=det_update_interval,
+                    fit_profile=fit_profile,
+                    peak_method=peak_method, stats_centre=stats_centre,
+                    min_prominence_ratio=brg2_min_prominence,
+                    move_to_peak=True, move_target="peak_pos",
+                    fine_scan=False,
+                    dmov_delay=dmov_delay,
+                    plot=plot,
+                    backlash_correction=backlash_correction,
+                    monitor_pv=monitor_pv if monitor_brg2 else "",
+                    simulate=False, debug=not verbose,
+                )
+                brg2_bpm_pos = _read_pv(brg2)
+                if verbose:
+                    cen_str = (f"{r_brg2_bpm.center:.6g}"
+                               if r_brg2_bpm.center is not None else "n/a")
+                    print(f"    BRG2: {r_brg2_bpm.status.value}  peak={cen_str}")
+            else:
+                if verbose:
+                    print(f"    [SIM] BRG2 BPM rescan skipped")
+
+            # ── l) Roll2 BPM zero scan ─────────────────────────────────────────
+            roll2_bpm_pos = float("nan")
+            if _bpm_y_pv:
+                if step_cb: step_cb("Roll2 BPM scan")
+                if not simulate:
+                    if verbose:
+                        print(f"\n  l) Roll2 BPM scan  "
+                              f"(step={bpm_y_search_step} mdeg, max={bpm_max_steps})")
+                    roll2_bpm_tgt, _ok_y, _ = _bpm_zero_scan(
+                        roll2_motor, _bpm_y_pv,
+                        search_step=bpm_y_search_step,
+                        max_steps=bpm_max_steps,
+                        correction_sign=+1,
+                        settle=settle,
+                        log_fn=_bpm_log,
+                        motor_name="Roll2",
+                    )
+                    if _ok_y and not np.isnan(roll2_bpm_tgt):
+                        _write_pv(roll2_motor, roll2_bpm_tgt,
+                                  f"Roll2 → {roll2_bpm_tgt:.4g}")
+                        time.sleep(settle)
+                    roll2_bpm_pos = _read_pv(roll2_motor)
+                else:
+                    if verbose:
+                        print(f"\n  l) [SIM] Roll2 BPM scan skipped")
+                    roll2_bpm_pos = record.get("Roll2", float("nan"))
+
+            # ── m) Record BPM results and update the record ────────────────────
+            if step_cb: step_cb("Record BPM results")
+            record["X2_bpm"]    = x2_bpm_pos
+            record["Roll2_bpm"] = roll2_bpm_pos
+            record["BRG2_bpm"]  = brg2_bpm_pos
+            record["datetime"]  = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if verbose:
+                print(f"\n  m) BPM results:  "
+                      f"X2_bpm={x2_bpm_pos:.4g}  "
+                      f"Roll2_bpm={roll2_bpm_pos:.4g}  "
+                      f"BRG2_bpm={brg2_bpm_pos:.4g}")
+
+        # Write CSV: after BPM phase if bpm_align, at step h otherwise
+        if writer and bpm_align:
+            writer.writerow(record)
+            csv_file.flush()
 
         if verbose:
             saved_msg = f"  Results appended to {filename}" if _save_csv else "  (CSV save skipped)"

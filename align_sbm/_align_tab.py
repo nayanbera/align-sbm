@@ -2,14 +2,14 @@
 import numpy as np
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIntValidator
+from PyQt6.QtGui import QDoubleValidator, QFont, QIntValidator
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QGroupBox, QCheckBox, QPushButton, QLabel, QLineEdit,
     QProgressBar, QPlainTextEdit, QListWidget, QListWidgetItem,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox,
-    QAbstractItemView,
+    QAbstractItemView, QSpinBox,
 )
 from .smart_scan_functions import ScanStatus
 from ._hold_widget import HoldConditionsWidget
@@ -759,6 +759,72 @@ class AlignTab(QWidget):
         rv.addWidget(self._status_lbl)
         vbox.addWidget(run_grp)
 
+        # ── BPM Alignment group ──────────────────────────────────────────────
+        bpm_grp = QGroupBox("BPM Alignment (optional post-alignment phase)")
+        bpm_grp.setToolTip(
+            "When enabled, runs an additional BPM position alignment phase after each\n"
+            "energy row's main alignment:\n"
+            "  i)  Open slits to bpm_slit_open × bpm_slit_open\n"
+            "  j)  Walk X2 until beam position X crosses zero, move to zero-crossing\n"
+            "  k)  Fine BRG2 rescan to maximise intensity\n"
+            "  l)  Walk Roll2 until beam position Y crosses zero, move to zero-crossing\n"
+            "  m)  Write one combined CSV row (Roll2, X2, Roll2_bpm, X2_bpm, BRG2_bpm)\n\n"
+            "Requires BPM X and BPM Y PVs to be set in Setup → Motors && PVs."
+        )
+        bv = QVBoxLayout(bpm_grp)
+
+        self._bpm_cb = QCheckBox("Enable BPM alignment after each energy row")
+        self._bpm_cb.setChecked(False)
+        bv.addWidget(self._bpm_cb)
+
+        def _dbl_le(val, lo=-1e9, hi=1e9, decimals=4, w=90):
+            le = QLineEdit(str(val))
+            le.setValidator(QDoubleValidator(lo, hi, decimals, le))
+            le.setFixedWidth(w)
+            return le
+
+        from PyQt6.QtWidgets import QFormLayout as _FL
+        bpf = _FL()
+        bpf.setContentsMargins(0, 4, 0, 0)
+
+        self._bpm_slit_edit = _dbl_le(10.0, lo=0.001, hi=100.0)
+        self._bpm_slit_edit.setToolTip(
+            "Slit opening (mm) used during BPM alignment (both V and H)")
+        bpf.addRow("Slit open (mm):", self._bpm_slit_edit)
+
+        self._bpm_x_step_edit = _dbl_le(10.0, lo=0.001, hi=10000.0)
+        self._bpm_x_step_edit.setToolTip(
+            "X2 step size (μm) for the BPMX zero-crossing walk")
+        bpf.addRow("X2 step (μm):", self._bpm_x_step_edit)
+
+        self._bpm_y_step_edit = _dbl_le(0.001, lo=1e-6, hi=1.0)
+        self._bpm_y_step_edit.setToolTip(
+            "Roll2 step size (mdeg) for the BPMY zero-crossing walk")
+        bpf.addRow("Roll2 step (mdeg):", self._bpm_y_step_edit)
+
+        self._bpm_max_steps_sb = QSpinBox()
+        self._bpm_max_steps_sb.setRange(2, 200)
+        self._bpm_max_steps_sb.setValue(20)
+        self._bpm_max_steps_sb.setFixedWidth(70)
+        self._bpm_max_steps_sb.setToolTip(
+            "Maximum steps to walk before giving up on zero-crossing search")
+        bpf.addRow("Max steps:", self._bpm_max_steps_sb)
+
+        bv.addLayout(bpf)
+
+        # Enable/disable parameter fields based on checkbox state
+        _bpm_fields = [
+            self._bpm_slit_edit, self._bpm_x_step_edit,
+            self._bpm_y_step_edit, self._bpm_max_steps_sb,
+        ]
+        def _toggle_bpm_fields(checked):
+            for w in _bpm_fields:
+                w.setEnabled(checked)
+        _toggle_bpm_fields(False)
+        self._bpm_cb.toggled.connect(_toggle_bpm_fields)
+
+        vbox.addWidget(bpm_grp)
+
         self._hold_widget = HoldConditionsWidget(self._settings)
         self._hold_widget.suspend_triggered.connect(self._on_worker_suspend)
         self._hold_widget.suspend_cleared.connect(self._on_worker_resume)
@@ -1499,6 +1565,23 @@ class AlignTab(QWidget):
 
         simulate = self._sim_cb.isChecked()
         kwargs   = self._setup_tab.get_kwargs()
+
+        # BPM alignment kwargs
+        if self._bpm_cb.isChecked():
+            kwargs["bpm_align"] = True
+            try:
+                kwargs["bpm_slit_open"] = float(self._bpm_slit_edit.text())
+            except ValueError:
+                kwargs["bpm_slit_open"] = 10.0
+            try:
+                kwargs["bpm_x_search_step"] = float(self._bpm_x_step_edit.text())
+            except ValueError:
+                kwargs["bpm_x_search_step"] = 10.0
+            try:
+                kwargs["bpm_y_search_step"] = float(self._bpm_y_step_edit.text())
+            except ValueError:
+                kwargs["bpm_y_search_step"] = 0.001
+            kwargs["bpm_max_steps"] = int(self._bpm_max_steps_sb.value())
 
         # Block if any selected row's crystal doesn't match the current crystal
         if self._check_crystal_mismatch():

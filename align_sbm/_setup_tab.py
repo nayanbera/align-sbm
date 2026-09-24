@@ -41,6 +41,8 @@ _PV_DEFAULTS = {
     "und_start_pv":   "ID15A2:und:Start",
     "roll2_energy_pv":"ID15A2:Roll2:EnergySet",
     "x2_energy_pv":   "ID15A2:X2:EnergySet",
+    "bpm_x_pv":       "",
+    "bpm_y_pv":       "",
 }
 
 _SCAN_DEFAULTS = {
@@ -224,6 +226,20 @@ class SetupTab(QWidget):
         ]:
             pvf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
         vbox.addWidget(pv_grp)
+
+        # BPM position readbacks
+        bpm_grp = QGroupBox("BPM Position Readbacks  ·  current value →")
+        bpmf = QFormLayout(bpm_grp)
+        for key, label, tip in [
+            ("bpm_x_pv", "BPM X (BPMX)",
+             "EPICS PV for beam position along X — used by the optional BPM alignment phase.\n"
+             "BPMX > 0 → X2 moves negative; BPMX < 0 → X2 moves positive."),
+            ("bpm_y_pv", "BPM Y (BPMY)",
+             "EPICS PV for beam position along Y — used by the optional BPM alignment phase.\n"
+             "BPMY > 0 → Roll2 moves positive; BPMY < 0 → Roll2 moves negative."),
+        ]:
+            bpmf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
+        vbox.addWidget(bpm_grp)
 
         # ── Pre / Post energy change PVs ────────────────────────────────────
         energy_pvs_grp = QGroupBox("Energy Change PVs")
@@ -611,7 +627,8 @@ class SetupTab(QWidget):
                 pv_map[key] = pv + ".RBV"
         for key in ("detector", "monitor_pv", "pitch_pv", "slit_v_pv", "slit_h_pv",
                     "mono_e_pv", "harmonic_pv", "und_e_pv", "und_start_pv",
-                    "roll2_energy_pv", "x2_energy_pv"):
+                    "roll2_energy_pv", "x2_energy_pv",
+                    "bpm_x_pv", "bpm_y_pv"):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv

@@ -232,6 +232,20 @@ On completion: fitted curve (red line), peak marker (dashed orange vertical line
 
 **CSV color coding** — a **Color by:** selector and **Edit Rules…** button appear in the CSV tab header. Rules are evaluated against the chosen column and the first matching rule wins. Each rule has an Operator, Value(s), an optional Label, and a Color (with alpha/opacity support). Legend chips above the table show the active rules.
 
+**BPM Alignment**
+
+Optional group of controls for the post-alignment BPM position phase:
+
+| Control | Default | Description |
+|---|---|---|
+| Enable BPM alignment | off | Run BPM phase after each energy row |
+| Slit open (mm) | 10.0 | Slit opening during BPM phase (V and H) |
+| X2 step (μm) | 10.0 | X2 walk step for BPMX zero crossing |
+| Roll2 step (mdeg) | 0.001 | Roll2 walk step for BPMY zero crossing |
+| Max steps | 20 | Max walk steps before giving up |
+
+Requires BPM PVs to be set in **Setup → Motors & PVs → BPM Position Readbacks**.
+
 #### Statistical Analysis Dialog
 
 Opened via **Analyze…** in the CSV tab.
@@ -263,9 +277,27 @@ For each selected energy row `align_beamline()` runs these steps:
 | f2 | `fly_scan` pitch (repeat) |
 | g-pre | Close horizontal slit |
 | g | `smart_scan` X2 → move to centroid |
-| h | Record RBVs, write CSV row, update Energy Table (Roll2, X2, timestamp) |
+| h | Record RBVs; update Energy Table (Roll2, X2, timestamp); write CSV if BPM disabled |
 
 Roll1 is moved to the table value at the energy-change step (before scanning) when a Roll1 motor is configured.
+
+### Optional BPM position alignment phase
+
+When **Enable BPM alignment** is checked on the Alignment tab, these additional steps run after step h:
+
+| Step | Action |
+|---|---|
+| i | Open slits to `bpm_slit_open` × `bpm_slit_open` (default 10 × 10 mm) |
+| j | Walk X2 in steps of `X2 step (μm)` until BPMX crosses zero; move X2 to interpolated zero position |
+| k | Fine BRG2 rescan (±`fine_sigma_range` × σ from step c) → move to peak |
+| l | Walk Roll2 in steps of `Roll2 step (mdeg)` until BPMY crosses zero; move Roll2 to interpolated zero position |
+| m | Record BPM RBVs; write one combined CSV row |
+
+**Zero-crossing algorithm:** The motor walks in a fixed direction (BPMX > 0 → X2 negative; BPMY < 0 → Roll2 negative) until the BPM signal changes sign, then linearly interpolates between the last two positions to find the exact zero crossing. Stops after `Max steps` without a sign change.
+
+**CSV columns added:** `X2_bpm`, `Roll2_bpm`, `BRG2_bpm` (existing rows backfilled with `0`). When BPM is enabled, the CSV write is deferred and only happens once after step m, combining both main-alignment and BPM results in a single row.
+
+**Setup:** Set `BPM X (BPMX)` and `BPM Y (BPMY)` readback PVs in **Setup → Motors & PVs → BPM Position Readbacks**. At least one BPM PV must be configured for the corresponding scan to run. If both are blank, the BPM phase opens the slits and rescans BRG2 only.
 
 ---
 
