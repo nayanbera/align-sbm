@@ -1693,7 +1693,10 @@ class AlignTab(QWidget):
     def _on_step_update(self, label: str, current: int, total: int):
         self._progress.setRange(0, total)
         self._progress.setValue(current)
-        self._status_lbl.setText(f"[{current}/{total}] {label}")
+        if current == 0:
+            self._status_lbl.setText(f"[0/{total}] {label}")
+        else:
+            self._status_lbl.setText(f"[{current}/{total}] {label} ✓")
         self.status_message.emit(f"{label}…")
 
     def _on_row_started(self, row_idx: int):

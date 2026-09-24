@@ -3031,7 +3031,6 @@ def align_beamline(
         _row_ok = True
         try:
             # ── Set energy ────────────────────────────────────────────────────
-            if step_cb: step_cb("Set energy")
             if verbose:
                 print(f"\n  Setting energy …")
             _set_energy_for_row(
@@ -3046,24 +3045,24 @@ def align_beamline(
                 pre_energy_pvs=pre_energy_pvs,
                 post_energy_pvs=post_energy_pvs,
             )
+            if step_cb: step_cb("Set energy")
 
             # ── a) Open slits ─────────────────────────────────────────────────
-            if step_cb: step_cb("Open slits")
             if verbose:
                 print(f"\n  a) Opening slits: V={slit_open_v}  H={slit_open_h}")
             _write_pv(slit_v, slit_open_v, f"slit_v → {slit_open_v}")
             _write_pv(slit_h, slit_open_h, f"slit_h → {slit_open_h}")
             time.sleep(5.0)
+            if step_cb: step_cb("Open slits")
 
             # ── b) Home pitch piezo ───────────────────────────────────────────
-            if step_cb: step_cb("Home pitch")
             if verbose:
                 print(f"\n  b) Setting pitch piezo to {pitch_home}")
             _write_pv(pitch, pitch_home, f"pitch → {pitch_home}")
             time.sleep(pitch_settle * 3)
+            if step_cb: step_cb("Home pitch")
 
             # ── c) BRG2 smart_scan → move to peak_pos ────────────────────────
-            if step_cb: step_cb("BRG2 scan")
             if verbose:
                 print(f"\n  c) BRG2 smart_scan  [{brg2_start:+g} … {brg2_stop:+g}  "
                       f"{brg2_nsteps} steps]")
@@ -3091,10 +3090,10 @@ def align_beamline(
             else:
                 if verbose:
                     print("    [SIM] BRG2 smart_scan skipped")
+            if step_cb: step_cb("BRG2 scan")
 
             # ── d) Pitch fly_scan ─────────────────────────────────────────────
             if do_pitch_scan:
-                if step_cb: step_cb("Pitch scan")
                 if verbose:
                     print(f"\n  d) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
                           f"{pitch_nsteps} steps]")
@@ -3128,19 +3127,19 @@ def align_beamline(
                 else:
                     if verbose:
                         print("    [SIM] Pitch fly_scan skipped")
+                if step_cb: step_cb("Pitch scan")
             else:
                 if verbose:
                     print("\n  d) Pitch scan disabled – skipping")
 
             # ── e) Close vertical slit ────────────────────────────────────────
-            if step_cb: step_cb("Close V slit")
             if verbose:
                 print(f"\n  e) Closing vertical slit: V={slit_close_v}")
             _write_pv(slit_v, slit_close_v, f"slit_v → {slit_close_v}")
             time.sleep(5.0)
+            if step_cb: step_cb("Close V slit")
 
             # ── f) Roll2 smart_scan → move to centroid ────────────────────────
-            if step_cb: step_cb("Roll2 scan")
             if verbose:
                 print(f"\n  f) Roll2 smart_scan  [{roll2_start:+g} … {roll2_stop:+g}  "
                       f"{roll2_nsteps} steps]")
@@ -3167,10 +3166,10 @@ def align_beamline(
             else:
                 if verbose:
                     print("    [SIM] Roll2 smart_scan skipped")
+            if step_cb: step_cb("Roll2 scan")
 
             # ── f2) Pitch fly_scan repeat ─────────────────────────────────────
             if do_pitch_scan:
-                if step_cb: step_cb("Pitch scan 2")
                 if verbose:
                     print(f"\n  f2) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
                           f"{pitch_nsteps} steps]")
@@ -3206,19 +3205,19 @@ def align_beamline(
                 else:
                     if verbose:
                         print("    [SIM] Pitch fly_scan (f2) skipped")
+                if step_cb: step_cb("Pitch scan 2")
             else:
                 if verbose:
                     print("\n  f2) Pitch scan disabled – skipping")
 
             # ── g-pre) Close horizontal slit ──────────────────────────────────
-            if step_cb: step_cb("Close H slit")
             if verbose:
                 print(f"\n  g-pre) Closing horizontal slit: H={slit_close_h}")
             _write_pv(slit_h, slit_close_h, f"slit_h → {slit_close_h}")
             time.sleep(5.0)
+            if step_cb: step_cb("Close H slit")
 
             # ── g) X2 smart_scan → move to centroid ───────────────────────────
-            if step_cb: step_cb("X2 scan")
             if verbose:
                 print(f"\n  g) X2 smart_scan  [{x2_start:+g} … {x2_stop:+g}  "
                       f"{x2_nsteps} steps]")
@@ -3245,6 +3244,7 @@ def align_beamline(
             else:
                 if verbose:
                     print("    [SIM] X2 smart_scan skipped")
+            if step_cb: step_cb("X2 scan")
 
         except KeyboardInterrupt:
             if verbose:
@@ -3273,7 +3273,6 @@ def align_beamline(
                 print(_tb.format_exc())
 
         # ── h) Read final RBV values and write CSV row ────────────────────────
-        if step_cb: step_cb("Record results")
         if verbose:
             print(f"\n  h) Recording optimised values …")
         if record_settle > 0 and not simulate:
@@ -3309,6 +3308,7 @@ def align_beamline(
         record["_roll2_center"] = r_roll2.center if r_roll2 and r_roll2.center is not None else float("nan")
         record["_x2_center"]   = r_x2.center    if r_x2    and r_x2.center    is not None else float("nan")
         record["_row_ok"]      = _row_ok
+        if step_cb: step_cb("Record results")
         results.append(record)
         if row_cb: row_cb(record)   # GUI update: Roll2/X2 from main alignment
 
@@ -3327,17 +3327,16 @@ def align_beamline(
                 print(f"  {'─'*56}")
 
             # ── i) Open slits to bpm_slit_open × bpm_slit_open ───────────────
-            if step_cb: step_cb("BPM open slits")
             if verbose:
                 print(f"\n  i) Opening slits: V={bpm_slit_open}  H={bpm_slit_open}")
             _write_pv(slit_v, bpm_slit_open, f"slit_v → {bpm_slit_open}")
             _write_pv(slit_h, bpm_slit_open, f"slit_h → {bpm_slit_open}")
             time.sleep(5.0)
+            if step_cb: step_cb("BPM open slits")
 
             # ── j) X2 BPM zero scan ────────────────────────────────────────────
             x2_bpm_pos = float("nan")
             if _bpm_x_pv:
-                if step_cb: step_cb("X2 BPM scan")
                 if not simulate:
                     if verbose:
                         print(f"\n  j) X2 BPM scan  "
@@ -3359,10 +3358,10 @@ def align_beamline(
                     if verbose:
                         print(f"\n  j) [SIM] X2 BPM scan skipped")
                     x2_bpm_pos = record.get("X2", float("nan"))
+                if step_cb: step_cb("X2 BPM scan")
 
             # ── k) BRG2 fine rescan ────────────────────────────────────────────
             brg2_bpm_pos = float("nan")
-            if step_cb: step_cb("BRG2 BPM rescan")
             if verbose:
                 print(f"\n  k) BRG2 BPM fine rescan")
             if not simulate:
@@ -3394,11 +3393,11 @@ def align_beamline(
             else:
                 if verbose:
                     print(f"    [SIM] BRG2 BPM rescan skipped")
+            if step_cb: step_cb("BRG2 BPM rescan")
 
             # ── l) Roll2 BPM zero scan ─────────────────────────────────────────
             roll2_bpm_pos = float("nan")
             if _bpm_y_pv:
-                if step_cb: step_cb("Roll2 BPM scan")
                 if not simulate:
                     if verbose:
                         print(f"\n  l) Roll2 BPM scan  "
@@ -3421,9 +3420,9 @@ def align_beamline(
                     if verbose:
                         print(f"\n  l) [SIM] Roll2 BPM scan skipped")
                     roll2_bpm_pos = record.get("Roll2", float("nan"))
+                if step_cb: step_cb("Roll2 BPM scan")
 
             # ── m) Record BPM results and update the record ────────────────────
-            if step_cb: step_cb("Record BPM results")
             record["X2_bpm"]    = x2_bpm_pos
             record["Roll2_bpm"] = roll2_bpm_pos
             record["BRG2_bpm"]  = brg2_bpm_pos
@@ -3433,6 +3432,7 @@ def align_beamline(
                       f"X2_bpm={x2_bpm_pos:.4g}  "
                       f"Roll2_bpm={roll2_bpm_pos:.4g}  "
                       f"BRG2_bpm={brg2_bpm_pos:.4g}")
+            if step_cb: step_cb("Record BPM results")
 
         # Write CSV: after BPM phase if bpm_align, at step h otherwise
         if writer and bpm_align:
