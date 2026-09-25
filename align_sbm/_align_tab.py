@@ -807,7 +807,7 @@ class AlignTab(QWidget):
             mismatched = (bool(current_crystal) and bool(crystal)
                           and crystal.strip() != current_crystal.strip())
             if mismatched:
-                item.setFlags(Qt.ItemFlag.ItemIsEnabled)   # selectable removed → grayed
+                continue
             elif crystal:
                 hex_color = self._crystal_widget.color_for_display_name(crystal)
                 if hex_color:
