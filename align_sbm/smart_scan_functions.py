@@ -2925,6 +2925,8 @@ def align_beamline(
     row_cb                      = None,
     pre_energy_pvs      : list  = None,
     post_energy_pvs     : list  = None,
+    pre_align_pvs       : list  = None,
+    post_align_pvs      : list  = None,
     roll1_motor         : str   = None,
     bpm_align           : bool  = False,
     bpm_x_pv            : str   = "",
@@ -3164,6 +3166,28 @@ def align_beamline(
     else:
         csv_file = None
         writer   = None
+
+    def _apply_align_pvs(pvlist, label):
+        """Write (pvname, value[, wait_pv, wait_value]) tuples around the alignment run."""
+        if not pvlist:
+            return
+        if verbose:
+            print(f"\n  {label}:")
+        for entry in pvlist:
+            pvname, value = entry[0], entry[1]
+            wait_pv    = entry[2] if len(entry) > 2 else None
+            wait_value = entry[3] if len(entry) > 3 else None
+            if simulate or not _EPICS_AVAILABLE:
+                if verbose:
+                    print(f"    [SIM] caput {pvname} {value}")
+                    if wait_pv:
+                        print(f"    [SIM] wait {wait_pv} == {wait_value}")
+            else:
+                _pv_put(pvname, value, pvname, wait=False, verbose=verbose)
+                if wait_pv:
+                    _wait_for_pv(wait_pv, wait_value, timeout=30, verbose=verbose)
+
+    _apply_align_pvs(pre_align_pvs, "Pre-alignment PVs")
 
     # ── Main loop ─────────────────────────────────────────────────────────────
     for row_idx, row in enumerate(table):
@@ -3707,6 +3731,8 @@ def align_beamline(
 
     if csv_file:
         csv_file.close()
+
+    _apply_align_pvs(post_align_pvs, "Post-alignment PVs")
 
     if verbose:
         print(f"\n{'═'*60}")

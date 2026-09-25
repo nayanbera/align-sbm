@@ -323,6 +323,55 @@ class SetupTab(QWidget):
 
         vbox.addWidget(energy_pvs_grp)
 
+        # ── Alignment Start/End PVs ───────────────────────────────────────────
+        align_pvs_grp = QGroupBox("Alignment Start / End PVs")
+        align_pvs_grp.setToolTip(
+            "Optional PVs written once at the start and end of the full alignment run.\n"
+            "'Pre' rows are written before the first energy row; "
+            "'Post' rows are written after the last row completes."
+        )
+        apv = QVBoxLayout(align_pvs_grp)
+
+        info_apv = QLabel(
+            "PVs written at the start and end of the alignment run — e.g. enable/disable "
+            "feedback loops, set beam mode, or log run boundaries.\n"
+            "<b>PV Name</b>: EPICS PV to write.  "
+            "<b>Value</b>: value to write.  "
+            "<b>When</b>: Pre = before alignment starts; Post = after alignment finishes.  "
+            "<b>Wait PV</b> (optional): poll this PV after writing.  "
+            "<b>Wait Value</b>: target value to wait for (timeout 30 s)."
+        )
+        info_apv.setWordWrap(True)
+        apv.addWidget(info_apv)
+
+        self._align_pv_table = QTableWidget(0, 5)
+        self._align_pv_table.setHorizontalHeaderLabels(["PV Name", "Value", "When", "Wait PV", "Wait Value"])
+        self._align_pv_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._align_pv_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._align_pv_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._align_pv_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._align_pv_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self._align_pv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._align_pv_table.setMaximumHeight(160)
+        apv.addWidget(self._align_pv_table)
+
+        apv_btns = QHBoxLayout()
+        add_pre_align_btn = QPushButton("Add Pre")
+        add_pre_align_btn.setToolTip("Add a PV to write before the alignment run starts")
+        add_pre_align_btn.clicked.connect(lambda: self._add_align_pv_row("Pre"))
+        add_post_align_btn = QPushButton("Add Post")
+        add_post_align_btn.setToolTip("Add a PV to write after the alignment run finishes")
+        add_post_align_btn.clicked.connect(lambda: self._add_align_pv_row("Post"))
+        rem_apv_btn = QPushButton("Remove")
+        rem_apv_btn.clicked.connect(self._remove_align_pv_row)
+        apv_btns.addWidget(add_pre_align_btn)
+        apv_btns.addWidget(add_post_align_btn)
+        apv_btns.addWidget(rem_apv_btn)
+        apv_btns.addStretch()
+        apv.addLayout(apv_btns)
+
+        vbox.addWidget(align_pvs_grp)
+
         vbox.addStretch()
         scroll.setWidget(container)
         return scroll
@@ -722,6 +771,28 @@ class SetupTab(QWidget):
             if r >= 0:
                 self._energy_pv_table.removeRow(r)
 
+    def _add_align_pv_row(self, when="Pre", pv="", value="", wait_pv="", wait_value=""):
+        r = self._align_pv_table.rowCount()
+        self._align_pv_table.insertRow(r)
+        self._align_pv_table.setItem(r, 0, QTableWidgetItem(pv))
+        self._align_pv_table.setItem(r, 1, QTableWidgetItem(str(value)))
+        when_cb = _NoScrollComboBox()
+        when_cb.addItems(["Pre", "Post"])
+        when_cb.setCurrentText(when)
+        self._align_pv_table.setCellWidget(r, 2, when_cb)
+        self._align_pv_table.setItem(r, 3, QTableWidgetItem(str(wait_pv)))
+        self._align_pv_table.setItem(r, 4, QTableWidgetItem(str(wait_value)))
+
+    def _remove_align_pv_row(self):
+        rows = sorted(
+            {idx.row() for idx in self._align_pv_table.selectedIndexes()}, reverse=True
+        )
+        if not rows:
+            rows = [self._align_pv_table.rowCount() - 1]
+        for r in rows:
+            if r >= 0:
+                self._align_pv_table.removeRow(r)
+
     def _subscribe_pvs(self):
         """Create CA monitors for all configured motor / PV names."""
         self._unsubscribe_pvs()
@@ -865,6 +936,39 @@ class SetupTab(QWidget):
         kwargs["pre_energy_pvs"]  = pre_energy_pvs  or None
         kwargs["post_energy_pvs"] = post_energy_pvs or None
 
+        # Build pre/post alignment PV lists from the alignment start/end table
+        pre_align_pvs, post_align_pvs = [], []
+        for r in range(self._align_pv_table.rowCount()):
+            pv_item   = self._align_pv_table.item(r, 0)
+            val_item  = self._align_pv_table.item(r, 1)
+            cb        = self._align_pv_table.cellWidget(r, 2)
+            wpv_item  = self._align_pv_table.item(r, 3)
+            wval_item = self._align_pv_table.item(r, 4)
+            pv        = pv_item.text().strip()   if pv_item   else ""
+            raw_v     = val_item.text().strip()  if val_item  else ""
+            when      = cb.currentText() if cb else "Pre"
+            wait_pv   = wpv_item.text().strip()  if wpv_item  else ""
+            raw_wv    = wval_item.text().strip() if wval_item else ""
+            if not pv:
+                continue
+            try:
+                value = float(raw_v)
+            except ValueError:
+                value = raw_v
+            entry = (pv, value)
+            if wait_pv:
+                try:
+                    wait_value = float(raw_wv)
+                except ValueError:
+                    wait_value = raw_wv
+                entry = (pv, value, wait_pv, wait_value)
+            if when == "Pre":
+                pre_align_pvs.append(entry)
+            else:
+                post_align_pvs.append(entry)
+        kwargs["pre_align_pvs"]  = pre_align_pvs  or None
+        kwargs["post_align_pvs"] = post_align_pvs or None
+
         return kwargs
 
     def reload_settings(self):
@@ -904,6 +1008,19 @@ class SetupTab(QWidget):
             if pv:
                 epv_rows.append((pv, value, when, wait_pv, wait_val))
         self._settings.setValue("energy_pvs", repr(epv_rows))
+
+        # Save alignment start/end PV table
+        apv_rows = []
+        for r in range(self._align_pv_table.rowCount()):
+            pv       = (self._align_pv_table.item(r, 0) or QTableWidgetItem()).text().strip()
+            value    = (self._align_pv_table.item(r, 1) or QTableWidgetItem()).text().strip()
+            cb       = self._align_pv_table.cellWidget(r, 2)
+            when     = cb.currentText() if cb else "Pre"
+            wait_pv  = (self._align_pv_table.item(r, 3) or QTableWidgetItem()).text().strip()
+            wait_val = (self._align_pv_table.item(r, 4) or QTableWidgetItem()).text().strip()
+            if pv:
+                apv_rows.append((pv, value, when, wait_pv, wait_val))
+        self._settings.setValue("align_pvs", repr(apv_rows))
 
     def _load_settings(self):
         for key, w in self._pv_widgets.items():
@@ -953,5 +1070,21 @@ class SetupTab(QWidget):
                         pv, value, when = row[:3]
                         wait_pv, wait_val = "", ""
                     self._add_energy_pv_row(when, pv, value, wait_pv, wait_val)
+            except Exception:
+                pass
+
+        # Restore alignment start/end PV table
+        raw_apv = self._settings.value("align_pvs")
+        if raw_apv:
+            try:
+                apv_rows = eval(raw_apv)  # noqa: S307
+                self._align_pv_table.setRowCount(0)
+                for row in apv_rows:
+                    if len(row) == 5:
+                        pv, value, when, wait_pv, wait_val = row
+                    else:
+                        pv, value, when = row[:3]
+                        wait_pv, wait_val = "", ""
+                    self._add_align_pv_row(when, pv, value, wait_pv, wait_val)
             except Exception:
                 pass
