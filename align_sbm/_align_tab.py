@@ -2,7 +2,8 @@
 import numpy as np
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIntValidator
+from PyQt6.QtGui import QFont, QIntValidator, QIcon
+from PyQt6.QtWidgets import QStyle
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QGroupBox, QCheckBox, QPushButton, QLabel, QLineEdit,
@@ -674,6 +675,8 @@ class AlignTab(QWidget):
         self._row_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self._row_list.setMaximumHeight(180)
         self._row_list.itemSelectionChanged.connect(self._update_row_count_label)
+        self._row_list.itemSelectionChanged.connect(self._update_row_tick_marks)
+        self._tick_icon  = QIcon()   # populated lazily on first use
         ev.addWidget(self._row_list)
         row_btns = QHBoxLayout()
         for label, slot in [("All",  self._select_all_rows),
@@ -826,6 +829,17 @@ class AlignTab(QWidget):
         total    = self._row_list.count()
         selected = sum(1 for i in range(total) if self._row_list.item(i).isSelected())
         self._row_count_lbl.setText(f"{selected} of {total} selected")
+
+    def _update_row_tick_marks(self):
+        if self._tick_icon.isNull():
+            from PyQt6.QtWidgets import QApplication
+            self._tick_icon = QApplication.style().standardIcon(
+                QStyle.StandardPixmap.SP_DialogApplyButton
+            )
+        blank = QIcon()
+        for i in range(self._row_list.count()):
+            it = self._row_list.item(i)
+            it.setIcon(self._tick_icon if it.isSelected() else blank)
 
     def _select_all_rows(self):
         for i in range(self._row_list.count()):
