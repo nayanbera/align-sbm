@@ -2819,10 +2819,10 @@ def _slit_center_scan(
     result_dict = {
         "status":    ok_status.value,
         "center":    center,
-        "sigma":     float("nan"),
-        "amplitude": float(sig_arr.max()) if len(sig_arr) else float("nan"),
+        "sigma":     None,   # no curve fit — _draw_fit will skip the fit overlay
+        "amplitude": None,
         "offset":    float(baseline),
-        "profile":   list(zip(pos_arr.tolist(), sig_arr.tolist())),
+        "profile":   None,
         "stats":     {},
     }
 

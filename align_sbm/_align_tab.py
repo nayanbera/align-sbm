@@ -1966,6 +1966,13 @@ class AlignTab(QWidget):
             self._fit_items[tab_name].setData([], [])
             if tab_name in self._param_items:
                 self._param_items[tab_name].setText("")
+            # Show centroid peak line even without a curve fit
+            cen = result.center
+            if cen is not None and not (isinstance(cen, float) and np.isnan(cen)):
+                self._peak_lines[tab_name].setValue(float(cen))
+                self._peak_lines[tab_name].setVisible(True)
+                if tab_name in self._param_items:
+                    self._param_items[tab_name].setText(f"Centroid: {float(cen):.6g}")
 
         if tab_name in self._plot_widgets:
             self._fit_to_data(self._plot_widgets[tab_name], pos, sig)
