@@ -410,6 +410,127 @@ class _CrystalConfigDialog(QDialog):
         return result
 
 
+class _ExportDialog(QDialog):
+    """Dialog for exporting a date-filtered, column-selected subset of the CSV."""
+
+    def __init__(self, headers, datetime_values, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export CSV Subset")
+        self.setMinimumWidth(420)
+
+        from PyQt6.QtWidgets import QDateTimeEdit, QFormLayout
+        from PyQt6.QtCore import QDateTime
+        from datetime import datetime as _dt
+
+        vbox = QVBoxLayout(self)
+
+        # ── Date range ────────────────────────────────────────────────────────
+        date_grp = QGroupBox("Date / Time Range")
+        form = QFormLayout(date_grp)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        fmt = "%Y-%m-%d %H:%M:%S"
+        parsed = []
+        for v in datetime_values:
+            try:
+                parsed.append(_dt.strptime(v.strip(), fmt))
+            except Exception:
+                pass
+
+        min_dt = min(parsed) if parsed else _dt(2020, 1, 1)
+        max_dt = max(parsed) if parsed else _dt.now()
+
+        def _to_qdt(d):
+            return QDateTime.fromString(d.strftime(fmt), "yyyy-MM-dd HH:mm:ss")
+
+        self._start_edit = QDateTimeEdit(_to_qdt(min_dt))
+        self._start_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self._start_edit.setCalendarPopup(True)
+        form.addRow("Start:", self._start_edit)
+
+        self._end_edit = QDateTimeEdit(_to_qdt(max_dt))
+        self._end_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self._end_edit.setCalendarPopup(True)
+        form.addRow("End:", self._end_edit)
+
+        vbox.addWidget(date_grp)
+
+        # ── Column selection ──────────────────────────────────────────────────
+        col_grp = QGroupBox("Columns to export")
+        cv = QVBoxLayout(col_grp)
+
+        btn_row = QHBoxLayout()
+        all_btn  = QPushButton("All")
+        none_btn = QPushButton("None")
+        all_btn.setMaximumWidth(55)
+        none_btn.setMaximumWidth(55)
+        btn_row.addWidget(all_btn)
+        btn_row.addWidget(none_btn)
+        btn_row.addStretch()
+        cv.addLayout(btn_row)
+
+        self._col_list = QListWidget()
+        self._col_list.setMaximumHeight(200)
+        for col in headers:
+            item = QListWidgetItem(col)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            if col == "datetime":
+                item.setToolTip("Always included in every export")
+                f = item.font()
+                f.setBold(True)
+                item.setFont(f)
+            self._col_list.addItem(item)
+        self._col_list.itemChanged.connect(self._on_col_changed)
+        cv.addWidget(self._col_list)
+        vbox.addWidget(col_grp)
+
+        all_btn.clicked.connect(self._select_all)
+        none_btn.clicked.connect(self._select_none)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        vbox.addWidget(btns)
+
+    def _on_col_changed(self, item):
+        if item.text() == "datetime" and item.checkState() != Qt.CheckState.Checked:
+            self._col_list.blockSignals(True)
+            item.setCheckState(Qt.CheckState.Checked)
+            self._col_list.blockSignals(False)
+
+    def _select_all(self):
+        for i in range(self._col_list.count()):
+            self._col_list.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _select_none(self):
+        for i in range(self._col_list.count()):
+            item = self._col_list.item(i)
+            if item.text() != "datetime":
+                item.setCheckState(Qt.CheckState.Unchecked)
+
+    def get_start_str(self):
+        return self._start_edit.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+
+    def get_end_str(self):
+        return self._end_edit.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+
+    def get_selected_columns(self):
+        cols = []
+        for i in range(self._col_list.count()):
+            item = self._col_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                cols.append(item.text())
+        if "datetime" not in cols:
+            cols.insert(0, "datetime")
+        elif cols[0] != "datetime":
+            cols.remove("datetime")
+            cols.insert(0, "datetime")
+        return cols
+
+
 class _CrystalStatusWidget(QWidget):
     """Chip showing the current crystal, updated via CA monitor."""
     _pv_received    = pyqtSignal(str)   # CA thread → Qt main thread
@@ -1043,6 +1164,14 @@ class AlignTab(QWidget):
         )
         analyze_btn.clicked.connect(self._analyze_csv)
         csv_hdr.addWidget(analyze_btn)
+        export_btn = QPushButton("Export…")
+        export_btn.setToolTip(
+            "Export a filtered subset of the CSV to a new file.\n"
+            "Filter by date range and choose which columns to include.\n"
+            "The datetime column is always included."
+        )
+        export_btn.clicked.connect(self._export_csv)
+        csv_hdr.addWidget(export_btn)
         cv.addLayout(csv_hdr)
 
         # Color coding row
@@ -1254,6 +1383,88 @@ class AlignTab(QWidget):
         from ._stats_dialog import StatsDialog
         dlg = StatsDialog(csv_path=self._csv_path, energy_tab=self._energy_tab, parent=self)
         dlg.exec()
+
+    def _export_csv(self):
+        """Export a date-filtered, column-selected subset of the current CSV to a new file."""
+        import csv, os
+        from datetime import datetime as _dt
+
+        path = self._csv_path
+        if not path or not os.path.isfile(path):
+            QMessageBox.warning(self, "Export CSV",
+                                "No CSV file is currently open.\nUse 'Open CSV…' first.")
+            return
+
+        try:
+            with open(path, newline="") as f:
+                reader = csv.DictReader(f)
+                headers = list(reader.fieldnames or [])
+                rows    = list(reader)
+        except Exception as e:
+            QMessageBox.critical(self, "Export CSV", f"Could not read file:\n{e}")
+            return
+
+        if not headers:
+            QMessageBox.warning(self, "Export CSV", "The CSV file has no columns.")
+            return
+
+        dt_col    = "datetime"
+        dt_values = [r.get(dt_col, "") for r in rows]
+
+        dlg = _ExportDialog(headers, dt_values, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        start_str = dlg.get_start_str()
+        end_str   = dlg.get_end_str()
+        sel_cols  = [c for c in dlg.get_selected_columns() if c in headers]
+
+        fmt = "%Y-%m-%d %H:%M:%S"
+        try:
+            start_dt = _dt.strptime(start_str, fmt)
+            end_dt   = _dt.strptime(end_str,   fmt)
+        except Exception:
+            QMessageBox.critical(self, "Export CSV", "Invalid date/time format.")
+            return
+
+        if end_dt < start_dt:
+            QMessageBox.warning(self, "Export CSV",
+                                "End date must be on or after start date.")
+            return
+
+        filtered = []
+        for row in rows:
+            val = row.get(dt_col, "").strip()
+            try:
+                if start_dt <= _dt.strptime(val, fmt) <= end_dt:
+                    filtered.append(row)
+            except Exception:
+                pass
+
+        if not filtered:
+            QMessageBox.information(self, "Export CSV",
+                                    "No rows fall within the selected date range.")
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Export CSV subset", "", "CSV files (*.csv);;All files (*)"
+        )
+        if not save_path:
+            return
+
+        try:
+            with open(save_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=sel_cols, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(filtered)
+        except Exception as e:
+            QMessageBox.critical(self, "Export CSV", f"Could not write file:\n{e}")
+            return
+
+        QMessageBox.information(
+            self, "Export CSV",
+            f"Exported {len(filtered)} row(s), {len(sel_cols)} column(s)\nto: {save_path}"
+        )
 
     def _add_csv_column(self):
         """Prompt for a column label + PV, caget the current value, backfill all rows."""
