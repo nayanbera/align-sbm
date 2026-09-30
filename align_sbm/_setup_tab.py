@@ -268,7 +268,7 @@ class SetupTab(QWidget):
         vbox.addWidget(bpm_grp)
 
         # BPM motor PVs (for BPM motor calibration phase)
-        bpmmotor_grp = QGroupBox("BPM Motor PVs")
+        bpmmotor_grp = QGroupBox("BPM Motor PVs  ·  current value →")
         bpmmf = QFormLayout(bpmmotor_grp)
         for key, label, tip in [
             ("bpmx_motor", "BPM-X motor",
@@ -867,14 +867,16 @@ class SetupTab(QWidget):
         bridge = self._bridge
         pv_map = {}
         for key in ("brg2", "roll1_motor", "roll2_motor", "x2_motor",
-                    "slit_v_top_pv", "slit_v_bot_pv"):
+                    "slit_v_top_pv", "slit_v_bot_pv",
+                    "bpmx_motor", "bpmy_motor"):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv + ".RBV"
         for key in ("detector", "monitor_pv", "pitch_pv", "slit_v_pv", "slit_h_pv",
                     "mono_e_pv", "harmonic_pv", "und_e_pv", "und_start_pv",
                     "roll2_energy_pv", "x2_energy_pv",
-                    "bpm_x_pv", "bpm_y_pv", "slit_v_center_pv"):
+                    "bpm_x_pv", "bpm_y_pv", "slit_v_center_pv",
+                    "scale_x_pv", "scale_y_pv"):
             pv = self._pv_widgets[key].text().strip()
             if pv:
                 pv_map[key] = pv
