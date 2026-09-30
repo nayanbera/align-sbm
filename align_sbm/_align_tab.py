@@ -651,9 +651,21 @@ class _CrystalStatusWidget(QWidget):
 
     def color_for_raw_value(self, raw_value: str) -> str:
         """Return the hex color for a raw PV value (e.g. from energyMode CSV column), or ''."""
+        rv = raw_value.strip()
+        try:
+            rv_float = float(rv)
+        except ValueError:
+            rv_float = None
         for m in self._mappings:
-            if m.get("raw", "").strip() == raw_value.strip():
+            stored = m.get("raw", "").strip()
+            if stored == rv:
                 return m.get("color", "")
+            if rv_float is not None:
+                try:
+                    if float(stored) == rv_float:
+                        return m.get("color", "")
+                except ValueError:
+                    pass
         return ""
 
     def _configure(self):
