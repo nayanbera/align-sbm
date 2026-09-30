@@ -649,6 +649,13 @@ class _CrystalStatusWidget(QWidget):
                 return m.get("color", "")
         return ""
 
+    def color_for_raw_value(self, raw_value: str) -> str:
+        """Return the hex color for a raw PV value (e.g. from energyMode CSV column), or ''."""
+        for m in self._mappings:
+            if m.get("raw", "").strip() == raw_value.strip():
+                return m.get("color", "")
+        return ""
+
     def _configure(self):
         dlg = _CrystalConfigDialog(
             pv_name=self._pv_name,
@@ -1614,8 +1621,46 @@ class AlignTab(QWidget):
                     break
 
     def _apply_crystal_coloring(self):
-        """Color CSV rows by crystal identity, matching MonoE to the energy table."""
+        """Color CSV rows by crystal identity.
+
+        Primary: use the 'energyMode' column (raw PV value) looked up via the
+        crystal widget's raw-value → color mapping.
+        Fallback: match MonoE to the energy table's crystal assignments.
+        """
         from PyQt6.QtGui import QBrush, QColor
+
+        def _paint_row(r, hex_color):
+            bg  = QColor(hex_color)
+            lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
+            fg  = QColor("#000000" if lum > 128 else "#ffffff")
+            bg_brush, fg_brush = QBrush(bg), QBrush(fg)
+            for c in range(self._csv_table.columnCount()):
+                item = self._csv_table.item(r, c)
+                if item:
+                    item.setBackground(bg_brush)
+                    item.setForeground(fg_brush)
+
+        def _col_idx(name):
+            return next(
+                (c for c in range(self._csv_table.columnCount())
+                 if self._csv_table.horizontalHeaderItem(c) and
+                    self._csv_table.horizontalHeaderItem(c).text() == name),
+                -1,
+            )
+
+        # ── Primary: energyMode column → raw PV value lookup ─────────────────
+        em_col = _col_idx("energyMode")
+        if em_col >= 0:
+            for r in range(self._csv_table.rowCount()):
+                val_item = self._csv_table.item(r, em_col)
+                if not val_item:
+                    continue
+                hex_color = self._crystal_widget.color_for_raw_value(val_item.text().strip())
+                if hex_color:
+                    _paint_row(r, hex_color)
+            return
+
+        # ── Fallback: MonoE → energy table crystal name → color ───────────────
         energy_rows = self._energy_tab.get_table()
         crystals    = self._energy_tab.get_row_crystals()
         crystal_map = {}
@@ -1626,13 +1671,8 @@ class AlignTab(QWidget):
                 except (TypeError, ValueError):
                     pass
 
-        mono_col = next(
-            (c for c in range(self._csv_table.columnCount())
-             if self._csv_table.horizontalHeaderItem(c) and
-                self._csv_table.horizontalHeaderItem(c).text() == "MonoE"),
-            -1,
-        )
-        if mono_col < 0:
+        mono_col = _col_idx("MonoE")
+        if mono_col < 0 or not crystal_map:
             return
 
         for r in range(self._csv_table.rowCount()):
@@ -1653,18 +1693,8 @@ class AlignTab(QWidget):
             if not crystal:
                 continue
             hex_color = self._crystal_widget.color_for_display_name(crystal)
-            if not hex_color:
-                continue
-            bg  = QColor(hex_color)
-            lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
-            fg  = QColor("#000000" if lum > 128 else "#ffffff")
-            bg_brush = QBrush(bg)
-            fg_brush = QBrush(fg)
-            for c in range(self._csv_table.columnCount()):
-                item = self._csv_table.item(r, c)
-                if item:
-                    item.setBackground(bg_brush)
-                    item.setForeground(fg_brush)
+            if hex_color:
+                _paint_row(r, hex_color)
 
     @staticmethod
     def _eval_rule(val_str, rule):
