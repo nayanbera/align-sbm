@@ -127,14 +127,23 @@ class EnergyTab(QWidget):
         hex_color = self._crystal_color_fn(crystal) if crystal else ""
         self._table.blockSignals(True)
         try:
+            if hex_color:
+                bg = QColor(hex_color)
+                bg.setAlpha(255)   # force opaque — stored as #AARRGGBB, alpha may be 0
+                lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
+                fg  = QColor("#000000" if lum > 128 else "#ffffff")
+                bg_brush = QBrush(bg)
+                fg_brush = QBrush(fg)
             for c in range(self._table.columnCount()):
                 item = self._table.item(r, c)
                 if item is None:
                     continue
                 if hex_color:
-                    item.setBackground(QBrush(QColor(hex_color)))
+                    item.setBackground(bg_brush)
+                    item.setForeground(fg_brush)
                 else:
                     item.setBackground(QBrush())
+                    item.setForeground(QBrush())
         finally:
             self._table.blockSignals(False)
 
