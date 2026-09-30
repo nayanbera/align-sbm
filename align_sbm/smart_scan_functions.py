@@ -3586,9 +3586,10 @@ def align_beamline(
                     _half = fine_sigma_range * r_brg2.sigma
                 else:
                     _half = max(abs(brg2_start), abs(brg2_stop))
+                _brg2_sign = 1.0 if brg2_stop >= brg2_start else -1.0
                 r_brg2_bpm = smart_scan(
                     brg2, detector,
-                    start=-_half, stop=_half, nsteps=fine_nsteps,
+                    start=-_brg2_sign * _half, stop=_brg2_sign * _half, nsteps=fine_nsteps,
                     mode="max", settle=settle,
                     det_update_interval=det_update_interval,
                     fit_profile=fit_profile,
