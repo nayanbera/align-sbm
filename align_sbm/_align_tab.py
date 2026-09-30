@@ -754,6 +754,7 @@ class AlignTab(QWidget):
         # Wire crystal colors into the energy table
         self._energy_tab.set_crystal_color_fn(self._crystal_widget.color_for_display_name)
         self._crystal_widget.mappings_changed.connect(self._energy_tab.refresh_row_colors)
+        self._crystal_widget.mappings_changed.connect(self._apply_csv_coloring)
 
         # Auto-fill Roll1 + Crystal when a new energy row is added
         self._energy_tab.set_auto_fill_fn(self._energy_auto_fill)
@@ -1182,10 +1183,10 @@ class AlignTab(QWidget):
         self._color_col_combo.setToolTip("Select a column whose values drive row color coding")
         self._color_col_combo.currentTextChanged.connect(self._on_color_col_changed)
         color_hdr.addWidget(self._color_col_combo)
-        edit_rules_btn = QPushButton("Edit Rules…")
-        edit_rules_btn.setToolTip("Define conditions and colors for row highlighting")
-        edit_rules_btn.clicked.connect(self._edit_color_rules)
-        color_hdr.addWidget(edit_rules_btn)
+        self._edit_rules_btn = QPushButton("Edit Rules…")
+        self._edit_rules_btn.setToolTip("Define conditions and colors for row highlighting")
+        self._edit_rules_btn.clicked.connect(self._edit_color_rules)
+        color_hdr.addWidget(self._edit_rules_btn)
         clear_color_btn = QPushButton("Clear Coloring")
         clear_color_btn.clicked.connect(self._clear_coloring)
         color_hdr.addWidget(clear_color_btn)
@@ -1332,6 +1333,7 @@ class AlignTab(QWidget):
             self._color_col_combo.blockSignals(True)
             self._color_col_combo.clear()
             self._color_col_combo.addItem("")
+            self._color_col_combo.addItem("Crystal")
             self._color_col_combo.addItems(headers)
             idx = self._color_col_combo.findText(prev)
             self._color_col_combo.setCurrentIndex(max(0, idx))
@@ -1557,20 +1559,31 @@ class AlignTab(QWidget):
 
     def _on_color_col_changed(self, col):
         self._color_col = col
+        if hasattr(self, '_edit_rules_btn'):
+            self._edit_rules_btn.setEnabled(bool(col) and col != "Crystal")
         self._apply_csv_coloring()
+        self._update_color_legend()
         self._save_color_settings()
 
     def _apply_csv_coloring(self):
         from PyQt6.QtGui import QBrush, QColor
-        # Clear all row backgrounds
+        # Clear all row backgrounds and foregrounds
         for r in range(self._csv_table.rowCount()):
             for c in range(self._csv_table.columnCount()):
                 item = self._csv_table.item(r, c)
                 if item:
                     item.setBackground(QBrush())
+                    item.setForeground(QBrush())
 
         col = self._color_col_combo.currentText() if hasattr(self, '_color_col_combo') else ""
-        if not col or not self._color_rules:
+        if not col:
+            return
+
+        if col == "Crystal":
+            self._apply_crystal_coloring()
+            return
+
+        if not self._color_rules:
             return
 
         col_idx = next(
@@ -1587,12 +1600,70 @@ class AlignTab(QWidget):
             val_str  = val_item.text() if val_item else ""
             for rule in self._color_rules:
                 if self._eval_rule(val_str, rule):
-                    brush = QBrush(QColor(rule.get("color", "#ffffff")))
+                    bg  = QColor(rule.get("color", "#ffffff"))
+                    lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
+                    fg  = QColor("#000000" if lum > 128 else "#ffffff")
+                    bg_brush = QBrush(bg)
+                    fg_brush = QBrush(fg)
                     for c in range(self._csv_table.columnCount()):
                         item = self._csv_table.item(r, c)
                         if item:
-                            item.setBackground(brush)
+                            item.setBackground(bg_brush)
+                            item.setForeground(fg_brush)
                     break
+
+    def _apply_crystal_coloring(self):
+        """Color CSV rows by crystal identity, matching MonoE to the energy table."""
+        from PyQt6.QtGui import QBrush, QColor
+        energy_rows = self._energy_tab.get_table()
+        crystals    = self._energy_tab.get_row_crystals()
+        crystal_map = {}
+        for i, row in enumerate(energy_rows):
+            if i < len(crystals) and crystals[i]:
+                try:
+                    crystal_map[float(row[0])] = crystals[i]
+                except (TypeError, ValueError):
+                    pass
+
+        mono_col = next(
+            (c for c in range(self._csv_table.columnCount())
+             if self._csv_table.horizontalHeaderItem(c) and
+                self._csv_table.horizontalHeaderItem(c).text() == "MonoE"),
+            -1,
+        )
+        if mono_col < 0:
+            return
+
+        for r in range(self._csv_table.rowCount()):
+            val_item = self._csv_table.item(r, mono_col)
+            if not val_item:
+                continue
+            try:
+                mono_e = float(val_item.text())
+            except ValueError:
+                continue
+            crystal   = ""
+            best_diff = 0.001
+            for e, crys in crystal_map.items():
+                diff = abs(e - mono_e)
+                if diff <= best_diff:
+                    best_diff = diff
+                    crystal   = crys
+            if not crystal:
+                continue
+            hex_color = self._crystal_widget.color_for_display_name(crystal)
+            if not hex_color:
+                continue
+            bg  = QColor(hex_color)
+            lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
+            fg  = QColor("#000000" if lum > 128 else "#ffffff")
+            bg_brush = QBrush(bg)
+            fg_brush = QBrush(fg)
+            for c in range(self._csv_table.columnCount()):
+                item = self._csv_table.item(r, c)
+                if item:
+                    item.setBackground(bg_brush)
+                    item.setForeground(fg_brush)
 
     @staticmethod
     def _eval_rule(val_str, rule):
@@ -1627,7 +1698,27 @@ class AlignTab(QWidget):
                 item.widget().deleteLater()
 
         col = self._color_col_combo.currentText() if hasattr(self, '_color_col_combo') else ""
-        if not col or not self._color_rules:
+        if not col:
+            return
+
+        if col == "Crystal":
+            for name in self._crystal_widget.get_display_names():
+                hex_color = self._crystal_widget.color_for_display_name(name)
+                if not hex_color:
+                    continue
+                c   = QColor(hex_color)
+                lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+                fg  = "#000000" if lum > 128 else "#ffffff"
+                chip = QLabel(f"  {name}  ")
+                chip.setStyleSheet(
+                    f"background-color: {hex_color}; color: {fg}; "
+                    "border-radius: 3px; padding: 1px 4px; font-size: 10px;"
+                )
+                self._color_legend_layout.addWidget(chip)
+            self._color_legend_layout.addStretch()
+            return
+
+        if not self._color_rules:
             return
 
         _OP_SYMS = {
@@ -1673,6 +1764,11 @@ class AlignTab(QWidget):
         if not col:
             QMessageBox.information(self, "Edit Rules",
                                     "Please select a 'Color by' column first.")
+            return
+        if col == "Crystal":
+            QMessageBox.information(self, "Edit Rules",
+                                    "Crystal coloring uses the crystal color configuration.\n"
+                                    "Click the ⚙ button next to 'Current Crystal' to edit colors.")
             return
         dlg = _ColorRuleDialog(rules=list(self._color_rules), parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
