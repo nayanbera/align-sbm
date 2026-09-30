@@ -899,7 +899,7 @@ class AlignTab(QWidget):
         per_e_row.addStretch()
         rv.addLayout(per_e_row)
 
-        self._bpm_cal_cb = QCheckBox("Enable BPM motor calibration")
+        self._bpm_cal_cb = QCheckBox("Enable Beam Position Calibration")
         self._bpm_cal_cb.setChecked(False)
         self._bpm_cal_cb.setToolTip(
             "Run BPM motor centering and scale calibration after the X2 scan:\n"
