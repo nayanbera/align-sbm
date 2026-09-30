@@ -954,6 +954,7 @@ class AlignTab(QWidget):
                 hex_color = self._crystal_widget.color_for_display_name(crystal)
                 if hex_color:
                     c   = QColor(hex_color)
+                    c.setAlpha(255)
                     lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
                     item.setBackground(QBrush(c))
                     item.setForeground(QBrush(QColor("#000000" if lum > 128 else "#ffffff")))
