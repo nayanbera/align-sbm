@@ -938,6 +938,9 @@ class AlignTab(QWidget):
         selected = {self._row_list.item(i).text()
                     for i in range(self._row_list.count())
                     if self._row_list.item(i).isSelected()}
+        # clear() destroys the C++ objects; drop references so _reset_buttons
+        # won't call methods on deleted items if a run is in progress.
+        self._running_list_items = []
         self._row_list.clear()
         crystals        = self._energy_tab.get_row_crystals()
         current_crystal = self._crystal_widget.current_display_name()
@@ -2035,10 +2038,13 @@ class AlignTab(QWidget):
         self._progress.setVisible(False)
         from PyQt6.QtGui import QBrush
         for item in self._running_list_items:
-            f = item.font()
-            f.setBold(False)
-            item.setFont(f)
-            item.setForeground(QBrush())
+            try:
+                f = item.font()
+                f.setBold(False)
+                item.setFont(f)
+                item.setForeground(QBrush())
+            except RuntimeError:
+                pass  # item's C++ object was deleted (list refreshed during run)
         self._running_list_items = []
 
     def _move_to_energy(self):
