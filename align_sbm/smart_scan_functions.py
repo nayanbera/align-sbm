@@ -3540,6 +3540,135 @@ def align_beamline(
         results.append(record)
         if row_cb: row_cb(record)   # GUI update: Roll2/X2 from main alignment
 
+        # ── BPM motor calibration phase ───────────────────────────────────────
+        # Runs whenever bpmx_motor or bpmy_motor PVs are configured.
+        _bpmx_mot = str(bpmx_motor or "").strip()
+        _bpmy_mot = str(bpmy_motor or "").strip()
+        _bpmc_x_pv = str(bpm_x_pv or "").strip()
+        _bpmc_y_pv = str(bpm_y_pv or "").strip()
+        if _do_bpm_motor and (_bpmx_mot or _bpmy_mot):
+            def _bpmc_log(msg):
+                if verbose: print(msg, end="")
+
+            # ── o) BPM-X motor zero-crossing centering ────────────────────
+            if _bpmx_mot and _bpmc_x_pv:
+                if verbose: print(f"\n  o) BPM-X motor centering  [{_bpmx_mot}]")
+                if simulate:
+                    bpmmotor_x_pos = 0.0
+                else:
+                    tgt, ok, _ = _bpm_zero_scan(
+                        _bpmx_mot, _bpmc_x_pv,
+                        bpmmotor_x_search_step, bpmmotor_max_steps,
+                        correction_sign=+1, settle=settle,
+                        log_fn=_bpmc_log, motor_name="BPM-X motor",
+                    )
+                    if ok:
+                        from epics import caput as _cp_bpmc
+                        _cp_bpmc(_bpmx_mot, tgt, wait=True)
+                        time.sleep(settle)
+                        bpmmotor_x_pos = tgt
+                    else:
+                        bpmmotor_x_pos = float("nan")
+                record["bpmmotor_x_pos"] = bpmmotor_x_pos
+                if step_cb: step_cb("BPM-X center")
+
+            # ── p) BPM-Y motor zero-crossing centering ────────────────────
+            if _bpmy_mot and _bpmc_y_pv:
+                if verbose: print(f"\n  p) BPM-Y motor centering  [{_bpmy_mot}]")
+                if simulate:
+                    bpmmotor_y_pos = 0.0
+                else:
+                    tgt, ok, _ = _bpm_zero_scan(
+                        _bpmy_mot, _bpmc_y_pv,
+                        bpmmotor_y_search_step, bpmmotor_max_steps,
+                        correction_sign=+1, settle=settle,
+                        log_fn=_bpmc_log, motor_name="BPM-Y motor",
+                    )
+                    if ok:
+                        from epics import caput as _cp_bpmc
+                        _cp_bpmc(_bpmy_mot, tgt, wait=True)
+                        time.sleep(settle)
+                        bpmmotor_y_pos = tgt
+                    else:
+                        bpmmotor_y_pos = float("nan")
+                record["bpmmotor_y_pos"] = bpmmotor_y_pos
+                if step_cb: step_cb("BPM-Y center")
+
+            # ── q) BPM-X scale factor calibration ────────────────────────
+            _sx_pv = str(scale_x_pv or "").strip()
+            if _bpmx_mot and _bpmc_x_pv and _sx_pv:
+                if verbose: print(f"\n  q) BPM-X scale factor calibration")
+                if simulate:
+                    record["new_scale_x"] = 98.5
+                else:
+                    from epics import caget as _cg_s, caput as _cp_s
+                    _cp_s(_bpmx_mot, 0.0, wait=True)
+                    time.sleep(settle)
+                    abpmx_base = _bpm_average(_bpmc_x_pv, bpm_navg, settle=0.1,
+                                              simulate=False, log_fn=_bpmc_log)
+                    _cp_s(_bpmx_mot, 0.1, wait=True)
+                    time.sleep(settle)
+                    bpmx_at_01 = _bpm_average(_bpmc_x_pv, bpm_navg, settle=0.1,
+                                              simulate=False, log_fn=_bpmc_log)
+                    del_x = bpmx_at_01 - abpmx_base
+                    sx_raw = _cg_s(_sx_pv, use_monitor=False)
+                    if sx_raw is not None and abs(del_x) > 1e-9:
+                        record["new_scale_x"] = 100.0 * float(sx_raw) / del_x
+                    if verbose:
+                        print(f"    abpmx_base={abpmx_base:.4g}  bpmx_at_01={bpmx_at_01:.4g}"
+                              f"  del_x={del_x:.4g}  new_scale_x={record['new_scale_x']:.4g}")
+                    _cp_s(_bpmx_mot, 0.0, wait=True)
+                    time.sleep(settle)
+                if step_cb: step_cb("BPM-X scale")
+
+            # ── r) BPM-Y scale factor calibration ────────────────────────
+            _sy_pv = str(scale_y_pv or "").strip()
+            if _bpmy_mot and _bpmc_y_pv and _sy_pv:
+                if verbose: print(f"\n  r) BPM-Y scale factor calibration")
+                if simulate:
+                    record["new_scale_y"] = 98.5
+                else:
+                    from epics import caget as _cg_s, caput as _cp_s
+                    _cp_s(_bpmy_mot, 0.0, wait=True)
+                    time.sleep(settle)
+                    abpmy_base = _bpm_average(_bpmc_y_pv, bpm_navg, settle=0.1,
+                                              simulate=False, log_fn=_bpmc_log)
+                    _cp_s(_bpmy_mot, 0.1, wait=True)
+                    time.sleep(settle)
+                    bpmy_at_01 = _bpm_average(_bpmc_y_pv, bpm_navg, settle=0.1,
+                                              simulate=False, log_fn=_bpmc_log)
+                    del_y = bpmy_at_01 - abpmy_base
+                    sy_raw = _cg_s(_sy_pv, use_monitor=False)
+                    if sy_raw is not None and abs(del_y) > 1e-9:
+                        record["new_scale_y"] = 100.0 * float(sy_raw) / del_y
+                    if verbose:
+                        print(f"    abpmy_base={abpmy_base:.4g}  bpmy_at_01={bpmy_at_01:.4g}"
+                              f"  del_y={del_y:.4g}  new_scale_y={record['new_scale_y']:.4g}")
+                    _cp_s(_bpmy_mot, 0.0, wait=True)
+                    time.sleep(settle)
+                if step_cb: step_cb("BPM-Y scale")
+
+            # ── s) Move both to 0, record abpmx / abpmy ──────────────────
+            if verbose: print(f"\n  s) BPM motors → 0, record abpmx/abpmy")
+            if not simulate:
+                from epics import caput as _cp_s
+                if _bpmx_mot:
+                    _cp_s(_bpmx_mot, 0.0, wait=True)
+                    time.sleep(settle)
+                if _bpmy_mot:
+                    _cp_s(_bpmy_mot, 0.0, wait=True)
+                    time.sleep(settle)
+            if _bpmc_x_pv:
+                record["abpmx"] = _bpm_average(
+                    _bpmc_x_pv, bpm_navg, settle=0.1, simulate=simulate, log_fn=_bpmc_log)
+            if _bpmc_y_pv:
+                record["abpmy"] = _bpm_average(
+                    _bpmc_y_pv, bpm_navg, settle=0.1, simulate=simulate, log_fn=_bpmc_log)
+            if verbose:
+                print(f"    abpmx={record.get('abpmx', float('nan')):.4g}"
+                      f"  abpmy={record.get('abpmy', float('nan')):.4g}")
+            if step_cb: step_cb("BPM motor home")
+
         # ── BPM alignment phase (optional) ────────────────────────────────────
         # Re-evaluate bpm_align at the checkpoint so a mid-row toggle takes effect.
         _run_bpm = bpm_align_fn() if bpm_align_fn is not None else bpm_align
@@ -3760,135 +3889,6 @@ def align_beamline(
                 if step_cb: step_cb("Slit V scan")
 
             record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # ── BPM motor calibration phase ───────────────────────────────────────
-        # Runs whenever bpmx_motor or bpmy_motor PVs are configured.
-        _bpmx_mot = str(bpmx_motor or "").strip()
-        _bpmy_mot = str(bpmy_motor or "").strip()
-        _bpmc_x_pv = str(bpm_x_pv or "").strip()
-        _bpmc_y_pv = str(bpm_y_pv or "").strip()
-        if _do_bpm_motor and (_bpmx_mot or _bpmy_mot):
-            def _bpmc_log(msg):
-                if verbose: print(msg, end="")
-
-            # ── o) BPM-X motor zero-crossing centering ────────────────────
-            if _bpmx_mot and _bpmc_x_pv:
-                if verbose: print(f"\n  o) BPM-X motor centering  [{_bpmx_mot}]")
-                if simulate:
-                    bpmmotor_x_pos = 0.0
-                else:
-                    tgt, ok, _ = _bpm_zero_scan(
-                        _bpmx_mot, _bpmc_x_pv,
-                        bpmmotor_x_search_step, bpmmotor_max_steps,
-                        correction_sign=+1, settle=settle,
-                        log_fn=_bpmc_log, motor_name="BPM-X motor",
-                    )
-                    if ok:
-                        from epics import caput as _cp_bpmc
-                        _cp_bpmc(_bpmx_mot, tgt, wait=True)
-                        time.sleep(settle)
-                        bpmmotor_x_pos = tgt
-                    else:
-                        bpmmotor_x_pos = float("nan")
-                record["bpmmotor_x_pos"] = bpmmotor_x_pos
-                if step_cb: step_cb("BPM-X center")
-
-            # ── p) BPM-Y motor zero-crossing centering ────────────────────
-            if _bpmy_mot and _bpmc_y_pv:
-                if verbose: print(f"\n  p) BPM-Y motor centering  [{_bpmy_mot}]")
-                if simulate:
-                    bpmmotor_y_pos = 0.0
-                else:
-                    tgt, ok, _ = _bpm_zero_scan(
-                        _bpmy_mot, _bpmc_y_pv,
-                        bpmmotor_y_search_step, bpmmotor_max_steps,
-                        correction_sign=+1, settle=settle,
-                        log_fn=_bpmc_log, motor_name="BPM-Y motor",
-                    )
-                    if ok:
-                        from epics import caput as _cp_bpmc
-                        _cp_bpmc(_bpmy_mot, tgt, wait=True)
-                        time.sleep(settle)
-                        bpmmotor_y_pos = tgt
-                    else:
-                        bpmmotor_y_pos = float("nan")
-                record["bpmmotor_y_pos"] = bpmmotor_y_pos
-                if step_cb: step_cb("BPM-Y center")
-
-            # ── q) BPM-X scale factor calibration ────────────────────────
-            _sx_pv = str(scale_x_pv or "").strip()
-            if _bpmx_mot and _bpmc_x_pv and _sx_pv:
-                if verbose: print(f"\n  q) BPM-X scale factor calibration")
-                if simulate:
-                    record["new_scale_x"] = 98.5
-                else:
-                    from epics import caget as _cg_s, caput as _cp_s
-                    _cp_s(_bpmx_mot, 0.0, wait=True)
-                    time.sleep(settle)
-                    abpmx_base = _bpm_average(_bpmc_x_pv, bpm_navg, settle=0.1,
-                                              simulate=False, log_fn=_bpmc_log)
-                    _cp_s(_bpmx_mot, 0.1, wait=True)
-                    time.sleep(settle)
-                    bpmx_at_01 = _bpm_average(_bpmc_x_pv, bpm_navg, settle=0.1,
-                                              simulate=False, log_fn=_bpmc_log)
-                    del_x = bpmx_at_01 - abpmx_base
-                    sx_raw = _cg_s(_sx_pv, use_monitor=False)
-                    if sx_raw is not None and abs(del_x) > 1e-9:
-                        record["new_scale_x"] = 100.0 * float(sx_raw) / del_x
-                    if verbose:
-                        print(f"    abpmx_base={abpmx_base:.4g}  bpmx_at_01={bpmx_at_01:.4g}"
-                              f"  del_x={del_x:.4g}  new_scale_x={record['new_scale_x']:.4g}")
-                    _cp_s(_bpmx_mot, 0.0, wait=True)
-                    time.sleep(settle)
-                if step_cb: step_cb("BPM-X scale")
-
-            # ── r) BPM-Y scale factor calibration ────────────────────────
-            _sy_pv = str(scale_y_pv or "").strip()
-            if _bpmy_mot and _bpmc_y_pv and _sy_pv:
-                if verbose: print(f"\n  r) BPM-Y scale factor calibration")
-                if simulate:
-                    record["new_scale_y"] = 98.5
-                else:
-                    from epics import caget as _cg_s, caput as _cp_s
-                    _cp_s(_bpmy_mot, 0.0, wait=True)
-                    time.sleep(settle)
-                    abpmy_base = _bpm_average(_bpmc_y_pv, bpm_navg, settle=0.1,
-                                              simulate=False, log_fn=_bpmc_log)
-                    _cp_s(_bpmy_mot, 0.1, wait=True)
-                    time.sleep(settle)
-                    bpmy_at_01 = _bpm_average(_bpmc_y_pv, bpm_navg, settle=0.1,
-                                              simulate=False, log_fn=_bpmc_log)
-                    del_y = bpmy_at_01 - abpmy_base
-                    sy_raw = _cg_s(_sy_pv, use_monitor=False)
-                    if sy_raw is not None and abs(del_y) > 1e-9:
-                        record["new_scale_y"] = 100.0 * float(sy_raw) / del_y
-                    if verbose:
-                        print(f"    abpmy_base={abpmy_base:.4g}  bpmy_at_01={bpmy_at_01:.4g}"
-                              f"  del_y={del_y:.4g}  new_scale_y={record['new_scale_y']:.4g}")
-                    _cp_s(_bpmy_mot, 0.0, wait=True)
-                    time.sleep(settle)
-                if step_cb: step_cb("BPM-Y scale")
-
-            # ── s) Move both to 0, record abpmx / abpmy ──────────────────
-            if verbose: print(f"\n  s) BPM motors → 0, record abpmx/abpmy")
-            if not simulate:
-                from epics import caput as _cp_s
-                if _bpmx_mot:
-                    _cp_s(_bpmx_mot, 0.0, wait=True)
-                    time.sleep(settle)
-                if _bpmy_mot:
-                    _cp_s(_bpmy_mot, 0.0, wait=True)
-                    time.sleep(settle)
-            if _bpmc_x_pv:
-                record["abpmx"] = _bpm_average(
-                    _bpmc_x_pv, bpm_navg, settle=0.1, simulate=simulate, log_fn=_bpmc_log)
-            if _bpmc_y_pv:
-                record["abpmy"] = _bpm_average(
-                    _bpmc_y_pv, bpm_navg, settle=0.1, simulate=simulate, log_fn=_bpmc_log)
-            if verbose:
-                print(f"    abpmx={record.get('abpmx', float('nan')):.4g}"
-                      f"  abpmy={record.get('abpmy', float('nan')):.4g}")
-            if step_cb: step_cb("BPM motor home")
 
         # Write CSV row — always after the BPM checkpoint regardless of _run_bpm
         if writer:
