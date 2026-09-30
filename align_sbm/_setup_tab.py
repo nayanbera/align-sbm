@@ -43,6 +43,10 @@ _PV_DEFAULTS = {
     "x2_energy_pv":   "ID15A2:X2:EnergySet",
     "bpm_x_pv":           "",
     "bpm_y_pv":           "",
+    "bpmx_motor":         "",
+    "bpmy_motor":         "",
+    "scale_x_pv":         "",
+    "scale_y_pv":         "",
     "slit_v_center_pv":   "",
     "slit_v_top_pv":      "",
     "slit_v_bot_pv":      "",
@@ -96,6 +100,13 @@ _SCAN_DEFAULTS = {
     "bpm_slit_v_start":     -2.0,
     "bpm_slit_v_stop":       2.0,
     "bpm_slit_v_nsteps":    21,
+    # BPM motor calibration phase
+    "bpm_navg":                  10,
+    "bpmmotor_x_search_step":    0.01,
+    "bpmmotor_y_search_step":    0.01,
+    "bpmmotor_max_steps":        20,
+    "bpmmotor_x_tolerance":      10.0,
+    "bpmmotor_y_tolerance":      10.0,
     # Other
     "settle":           0.3,
     "energy_settle":    2.0,
@@ -255,6 +266,22 @@ class SetupTab(QWidget):
         ]:
             bpmf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
         vbox.addWidget(bpm_grp)
+
+        # BPM motor PVs (for BPM motor calibration phase)
+        bpmmotor_grp = QGroupBox("BPM Motor PVs")
+        bpmmf = QFormLayout(bpmmotor_grp)
+        for key, label, tip in [
+            ("bpmx_motor", "BPM-X motor",
+             "Motor record PV for the BPM X-axis motor — used to center beam on BPM in X."),
+            ("bpmy_motor", "BPM-Y motor",
+             "Motor record PV for the BPM Y-axis motor — used to center beam on BPM in Y."),
+            ("scale_x_pv", "Scale X PV",
+             "PV holding the current BPM X scale factor (μm/mm). Read before the calibration move."),
+            ("scale_y_pv", "Scale Y PV",
+             "PV holding the current BPM Y scale factor (μm/mm). Read before the calibration move."),
+        ]:
+            bpmmf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
+        vbox.addWidget(bpmmotor_grp)
 
         # Slit V center motors (for BPM-phase slit scan)
         slitv_grp = QGroupBox("Slit V Center Motors  ·  current value →")
@@ -628,6 +655,46 @@ class SetupTab(QWidget):
         bpmsf.addRow("Slit V steps:", w)
 
         vbox.addWidget(bpm_scan_grp)
+
+        bpmcal_grp = QGroupBox("BPM Motor Calibration Parameters")
+        bpmcal_grp.setToolTip(
+            "Parameters for centering and calibrating the dedicated BPM-X/Y motors.\n"
+            "Runs automatically after the X2 scan when BPM motor PVs are configured."
+        )
+        bpmcalf = QFormLayout(bpmcal_grp)
+        bpmcalf.setFieldGrowthPolicy(_stay)
+
+        w = _int(_SCAN_DEFAULTS["bpm_navg"], lo=1, hi=1000)
+        w.setToolTip("Number of BPM readings to average for baseline and calibration measurements")
+        self._scan_widgets["bpm_navg"] = w
+        bpmcalf.addRow("BPM readings to avg:", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpmmotor_x_search_step"], lo=1e-5, hi=100.0, decimals=4, step=0.001)
+        w.setToolTip("BPM-X motor step size (mm) for the zero-crossing walk")
+        self._scan_widgets["bpmmotor_x_search_step"] = w
+        bpmcalf.addRow("BPM-X step (mm):", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpmmotor_y_search_step"], lo=1e-5, hi=100.0, decimals=4, step=0.001)
+        w.setToolTip("BPM-Y motor step size (mm) for the zero-crossing walk")
+        self._scan_widgets["bpmmotor_y_search_step"] = w
+        bpmcalf.addRow("BPM-Y step (mm):", w)
+
+        w = _int(_SCAN_DEFAULTS["bpmmotor_max_steps"], lo=2, hi=200)
+        w.setToolTip("Maximum number of steps for the BPM motor zero-crossing walk")
+        self._scan_widgets["bpmmotor_max_steps"] = w
+        bpmcalf.addRow("Max steps:", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpmmotor_x_tolerance"], lo=0.1, hi=10000.0, decimals=1, step=1.0)
+        w.setToolTip("Target |BPM X| (μm): centering stops when within this value of zero")
+        self._scan_widgets["bpmmotor_x_tolerance"] = w
+        bpmcalf.addRow("BPM-X tolerance (μm):", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpmmotor_y_tolerance"], lo=0.1, hi=10000.0, decimals=1, step=1.0)
+        w.setToolTip("Target |BPM Y| (μm): centering stops when within this value of zero")
+        self._scan_widgets["bpmmotor_y_tolerance"] = w
+        bpmcalf.addRow("BPM-Y tolerance (μm):", w)
+
+        vbox.addWidget(bpmcal_grp)
 
         # Other
         other_grp = QGroupBox("Other Parameters")

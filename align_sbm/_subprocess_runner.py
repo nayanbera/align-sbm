@@ -149,7 +149,18 @@ def run_alignment_row(q, row, kwargs, simulate, bpm_flag=None):
                    + (1 if _bpm_y_pv      else 0)
                    + (1 if _slit_v_ctr_pv else 0)
                   ) if kwargs.get("bpm_align") else 0
-    total_steps = (11 if do_pitch else 9) + bpm_steps
+    _bpmx_mot = str(kwargs.get("bpmx_motor") or "").strip()
+    _bpmy_mot = str(kwargs.get("bpmy_motor") or "").strip()
+    _sx_pv    = str(kwargs.get("scale_x_pv") or "").strip()
+    _sy_pv    = str(kwargs.get("scale_y_pv") or "").strip()
+    bpmcal_steps = (
+          (1 if (_bpmx_mot and _bpm_x_pv) else 0)
+        + (1 if (_bpmy_mot and _bpm_y_pv) else 0)
+        + (1 if (_bpmx_mot and _bpm_x_pv and _sx_pv) else 0)
+        + (1 if (_bpmy_mot and _bpm_y_pv and _sy_pv) else 0)
+        + (1 if (_bpmx_mot or _bpmy_mot)  else 0)
+    ) if (_bpmx_mot or _bpmy_mot) else 0
+    total_steps = (11 if do_pitch else 9) + bpm_steps + bpmcal_steps
     step_cnt    = [0]
 
     q.put(("step", "Starting…", 0, total_steps))
