@@ -2947,6 +2947,7 @@ def align_beamline(
     bpm_slit_v_start    : float = -2.0,
     bpm_slit_v_stop     : float = 2.0,
     bpm_slit_v_nsteps   : int   = 21,
+    bpm_align_fn                 = None,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -3490,10 +3491,6 @@ def align_beamline(
         record["slit_v_center_bpm"] = float("nan")
         record["slit_v_top_bpm"]   = float("nan")
         record["slit_v_bot_bpm"]   = float("nan")
-        # When BPM phase is enabled, defer CSV write until after BPM steps
-        if writer and not bpm_align:
-            writer.writerow(record)
-            csv_file.flush()
         record["_brg2_center"]  = r_brg2.center  if r_brg2  and r_brg2.center  is not None else float("nan")
         record["_roll2_center"] = r_roll2.center if r_roll2 and r_roll2.center is not None else float("nan")
         record["_x2_center"]   = r_x2.center    if r_x2    and r_x2.center    is not None else float("nan")
@@ -3503,7 +3500,9 @@ def align_beamline(
         if row_cb: row_cb(record)   # GUI update: Roll2/X2 from main alignment
 
         # ── BPM alignment phase (optional) ────────────────────────────────────
-        if bpm_align:
+        # Re-evaluate bpm_align at the checkpoint so a mid-row toggle takes effect.
+        _run_bpm = bpm_align_fn() if bpm_align_fn is not None else bpm_align
+        if _run_bpm:
             _bpm_x_pv = str(bpm_x_pv or "").strip()
             _bpm_y_pv = str(bpm_y_pv or "").strip()
 
@@ -3720,8 +3719,8 @@ def align_beamline(
 
             record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Write CSV: after BPM phase if bpm_align, at step h otherwise
-        if writer and bpm_align:
+        # Write CSV row — always after the BPM checkpoint regardless of _run_bpm
+        if writer:
             writer.writerow(record)
             csv_file.flush()
 

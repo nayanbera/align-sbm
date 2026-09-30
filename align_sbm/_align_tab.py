@@ -2443,14 +2443,13 @@ class AlignTab(QWidget):
             )
 
     def _on_bpm_toggled(self, checked: bool):
-        """Push BPM alignment toggle to the running worker between rows."""
+        """Push BPM alignment toggle to the running worker — mid-row and between rows."""
         self._loop_kwargs["bpm_align"] = checked
         if self._worker and self._worker.isRunning():
-            self._worker.update_kwargs(self._loop_kwargs)
+            self._worker.set_bpm_align(checked)    # mid-row: shared flag read at BPM checkpoint
+            self._worker.update_kwargs(self._loop_kwargs)  # between rows: kwargs snapshot
             state = "enabled" if checked else "disabled"
-            self._status_lbl.setText(
-                f"BPM alignment {state} — applies from next energy row"
-            )
+            self._status_lbl.setText(f"BPM alignment {state}")
 
     def _on_error(self, tb):
         self._log.appendPlainText(f"\n✗ ERROR:\n{tb}")

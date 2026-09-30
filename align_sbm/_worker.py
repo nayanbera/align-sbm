@@ -28,6 +28,7 @@ class AlignWorker(QThread):
         self._kwargs       = dict(kwargs)
         self._simulate     = simulate
         self._current_proc = None          # active subprocess
+        self._bpm_flag     = None          # multiprocessing.Value shared with current subprocess
         # Threading event set by the main thread via suspend()/resume().
         # The worker checks this flag instead of doing its own CA reads,
         # which avoids post-fork CA socket reliability issues entirely.
@@ -71,6 +72,12 @@ class AlignWorker(QThread):
     def resume(self):
         """Called from the main thread when hold conditions clear."""
         self._suspend_flag.clear()
+
+    def set_bpm_align(self, enabled: bool):
+        """Toggle BPM alignment for the currently-running subprocess mid-row."""
+        flag = self._bpm_flag
+        if flag is not None:
+            flag.value = int(enabled)
 
     def update_kwargs(self, kw: dict):
         """Replace scan parameters for subsequent rows.
@@ -159,10 +166,12 @@ class AlignWorker(QThread):
             self.row_started.emit(row_idx)
 
             # ── Spawn subprocess for this row ─────────────────────────────────
-            q    = ctx.Queue()
+            q        = ctx.Queue()
+            bpm_flag = ctx.Value('b', 1 if kwargs_this_row.get("bpm_align") else 0)
+            self._bpm_flag = bpm_flag
             proc = ctx.Process(
                 target=run_alignment_row,
-                args=(q, row, kwargs_this_row, self._simulate),
+                args=(q, row, kwargs_this_row, self._simulate, bpm_flag),
                 daemon=True,
             )
             self._current_proc = proc
@@ -236,6 +245,7 @@ class AlignWorker(QThread):
             except Exception:
                 pass
             self._current_proc = None
+            self._bpm_flag     = None   # no subprocess active — disable mid-row toggle
 
             if self.isInterruptionRequested():
                 break

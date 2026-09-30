@@ -20,7 +20,7 @@ def _result_to_dict(result):
     }
 
 
-def run_alignment_row(q, row, kwargs, simulate):
+def run_alignment_row(q, row, kwargs, simulate, bpm_flag=None):
     """
     Run align_beamline for a single energy row, streaming progress via q.
 
@@ -179,6 +179,7 @@ def run_alignment_row(q, row, kwargs, simulate):
             q.put(("scan_finished", args[0]))  # args[0] == result_dict
 
     # ── run ──────────────────────────────────────────────────────────────────
+    bpm_align_fn = (lambda: bool(bpm_flag.value)) if bpm_flag is not None else None
     try:
         with contextlib.redirect_stdout(_QStream()):
             align_beamline(
@@ -190,6 +191,7 @@ def run_alignment_row(q, row, kwargs, simulate):
                 row_cb=_row_cb,
                 bpm_data_cb=_bpm_data_cb,
                 slit_scan_cb=_slit_scan_cb,
+                bpm_align_fn=bpm_align_fn,
                 **kwargs,
             )
     except Exception:
