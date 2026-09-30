@@ -891,6 +891,7 @@ class AlignTab(QWidget):
             "  m)  Write combined CSV row (adds X2_bpm, Roll2_bpm, BRG2_bpm columns)\n\n"
             "Requires BPM X / Y PVs to be set in Setup → Motors && PVs."
         )
+        self._bpm_cb.toggled.connect(self._on_bpm_toggled)
         rv.addWidget(self._bpm_cb)
 
         self._progress = QProgressBar()
@@ -2439,6 +2440,16 @@ class AlignTab(QWidget):
                                       if k not in ("filename", "record_pvs")})
             self._status_lbl.setText(
                 f"Settings updated — will apply at the next energy row"
+            )
+
+    def _on_bpm_toggled(self, checked: bool):
+        """Push BPM alignment toggle to the running worker between rows."""
+        self._loop_kwargs["bpm_align"] = checked
+        if self._worker and self._worker.isRunning():
+            self._worker.update_kwargs(self._loop_kwargs)
+            state = "enabled" if checked else "disabled"
+            self._status_lbl.setText(
+                f"BPM alignment {state} — applies from next energy row"
             )
 
     def _on_error(self, tb):
