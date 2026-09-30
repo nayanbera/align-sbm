@@ -726,7 +726,7 @@ class AlignTab(QWidget):
 
         # CSV viewer state
         self._csv_path: str = ""
-        self._color_col: str = ""
+        self._color_col: str = "Crystal"
         self._color_rules: list = []
 
         # Loop state
@@ -1329,7 +1329,7 @@ class AlignTab(QWidget):
 
         # Update color-by combobox, preserving the current selection if still valid
         if hasattr(self, '_color_col_combo'):
-            prev = self._color_col_combo.currentText()
+            prev = self._color_col or self._color_col_combo.currentText()
             self._color_col_combo.blockSignals(True)
             self._color_col_combo.clear()
             self._color_col_combo.addItem("")
@@ -1788,7 +1788,7 @@ class AlignTab(QWidget):
         import json
         if not self._settings:
             return
-        self._color_col  = self._settings.value("csv_color_col", "")
+        self._color_col  = self._settings.value("csv_color_col", "Crystal")
         rules_raw        = self._settings.value("csv_color_rules", "[]")
         try:
             self._color_rules = json.loads(rules_raw) if isinstance(rules_raw, str) else []
