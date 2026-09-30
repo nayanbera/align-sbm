@@ -3614,7 +3614,7 @@ def align_beamline(
                     del_x = bpmx_at_01 - abpmx_base
                     sx_raw = _cg_s(_sx_pv, use_monitor=False)
                     if sx_raw is not None and abs(del_x) > 1e-9:
-                        record["new_scale_x"] = 100.0 * float(sx_raw) / del_x
+                        record["new_scale_x"] = 100.0 * float(sx_raw) / abs(del_x)
                     if verbose:
                         print(f"    abpmx_base={abpmx_base:.4g}  bpmx_at_01={bpmx_at_01:.4g}"
                               f"  del_x={del_x:.4g}  new_scale_x={record['new_scale_x']:.4g}")
@@ -3641,7 +3641,7 @@ def align_beamline(
                     del_y = bpmy_at_01 - abpmy_base
                     sy_raw = _cg_s(_sy_pv, use_monitor=False)
                     if sy_raw is not None and abs(del_y) > 1e-9:
-                        record["new_scale_y"] = 100.0 * float(sy_raw) / del_y
+                        record["new_scale_y"] = 100.0 * float(sy_raw) / abs(del_y)
                     if verbose:
                         print(f"    abpmy_base={abpmy_base:.4g}  bpmy_at_01={bpmy_at_01:.4g}"
                               f"  del_y={del_y:.4g}  new_scale_y={record['new_scale_y']:.4g}")
