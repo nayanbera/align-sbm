@@ -3618,6 +3618,10 @@ def align_beamline(
                     if verbose:
                         print(f"    abpmx_base={abpmx_base:.4g}  bpmx_at_01={bpmx_at_01:.4g}"
                               f"  del_x={del_x:.4g}  new_scale_x={record['new_scale_x']:.4g}")
+                    if not np.isnan(record["new_scale_x"]):
+                        _cp_s(_sx_pv, record["new_scale_x"], wait=True)
+                        if verbose:
+                            print(f"    → wrote new_scale_x={record['new_scale_x']:.4g} to {_sx_pv}")
                     _cp_s(_bpmx_mot, 0.0, wait=True)
                     time.sleep(settle)
                 if step_cb: step_cb("BPM-X scale")
@@ -3645,6 +3649,10 @@ def align_beamline(
                     if verbose:
                         print(f"    abpmy_base={abpmy_base:.4g}  bpmy_at_01={bpmy_at_01:.4g}"
                               f"  del_y={del_y:.4g}  new_scale_y={record['new_scale_y']:.4g}")
+                    if not np.isnan(record["new_scale_y"]):
+                        _cp_s(_sy_pv, record["new_scale_y"], wait=True)
+                        if verbose:
+                            print(f"    → wrote new_scale_y={record['new_scale_y']:.4g} to {_sy_pv}")
                     _cp_s(_bpmy_mot, 0.0, wait=True)
                     time.sleep(settle)
                 if step_cb: step_cb("BPM-Y scale")
