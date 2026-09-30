@@ -913,6 +913,19 @@ class AlignTab(QWidget):
         self._bpm_cb.toggled.connect(self._on_bpm_toggled)
         rv.addWidget(self._bpm_cb)
 
+        self._bpm_cal_cb = QCheckBox("Enable BPM motor calibration")
+        self._bpm_cal_cb.setChecked(False)
+        self._bpm_cal_cb.setToolTip(
+            "Run BPM motor centering and scale calibration after the X2 scan:\n"
+            "  o)  Walk BPM-X motor until BPM X crosses zero\n"
+            "  p)  Walk BPM-Y motor until BPM Y crosses zero\n"
+            "  q)  Calibrate BPM X scale factor (move 0.1 mm, measure, compute new_scale_x)\n"
+            "  r)  Calibrate BPM Y scale factor\n"
+            "  s)  Move both motors to 0, record abpmx / abpmy\n\n"
+            "Requires BPM Motor PVs to be set in Setup → Motors && PVs."
+        )
+        rv.addWidget(self._bpm_cal_cb)
+
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
         self._progress.setVisible(False)
@@ -1911,8 +1924,9 @@ class AlignTab(QWidget):
         simulate = self._sim_cb.isChecked()
         kwargs   = self._setup_tab.get_kwargs()
 
-        # BPM scan params come from setup tab get_kwargs(); just set the enable flag
-        kwargs["bpm_align"] = self._bpm_cb.isChecked()
+        # BPM scan params come from setup tab get_kwargs(); just set the enable flags
+        kwargs["bpm_align"]     = self._bpm_cb.isChecked()
+        kwargs["bpm_motor_cal"] = self._bpm_cal_cb.isChecked()
 
         # Block if any selected row's crystal doesn't match the current crystal
         if self._check_crystal_mismatch():

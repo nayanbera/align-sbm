@@ -2968,6 +2968,7 @@ def align_beamline(
     bpm_slit_v_stop     : float = 2.0,
     bpm_slit_v_nsteps   : int   = 21,
     bpm_align_fn                 = None,
+    bpm_motor_cal           : bool  = False,
     bpmx_motor              : str   = "",
     bpmy_motor              : str   = "",
     scale_x_pv              : str   = "",
@@ -3131,7 +3132,7 @@ def align_beamline(
     if bpm_align:
         fieldnames += ["X2_bpm", "Roll2_bpm", "BRG2_bpm",
                        "slit_v_center_bpm", "slit_v_top_bpm", "slit_v_bot_bpm"]
-    _do_bpm_motor = bool(str(bpmx_motor or "").strip() or str(bpmy_motor or "").strip())
+    _do_bpm_motor = bpm_motor_cal and bool(str(bpmx_motor or "").strip() or str(bpmy_motor or "").strip())
     if _do_bpm_motor:
         fieldnames += ["bpmmotor_x_pos", "bpmmotor_y_pos",
                        "new_scale_x", "new_scale_y", "abpmx", "abpmy"]
