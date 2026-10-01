@@ -756,7 +756,8 @@ class AlignTab(QWidget):
         self._loop_rows            = []
         self._loop_kwargs          = {}
         self._loop_simulate        = False
-        self._running_list_items   = []   # selected QListWidgetItems for current run
+        self._running_list_items       = []   # selected QListWidgetItems for current run
+        self._running_list_orig_colors = []   # (bg_brush, fg_brush) per item at run start
 
         self._build_ui()
         self._restore_last_csv()
@@ -1968,12 +1969,14 @@ class AlignTab(QWidget):
         except ValueError:
             self._loop_max = 0
 
-        # Snapshot selected list items for row highlighting during the run
-        self._running_list_items = [
-            self._row_list.item(i)
-            for i in range(self._row_list.count())
-            if self._row_list.item(i).isSelected()
-        ]
+        # Snapshot selected list items (and their original colors) for row highlighting
+        self._running_list_items       = []
+        self._running_list_orig_colors = []
+        for i in range(self._row_list.count()):
+            it = self._row_list.item(i)
+            if it.isSelected():
+                self._running_list_items.append(it)
+                self._running_list_orig_colors.append((it.background(), it.foreground()))
 
         # Clear results table and switch to Log tab for the new run
         self._results_table.setRowCount(0)
@@ -2059,16 +2062,19 @@ class AlignTab(QWidget):
         self._move_btn.setEnabled(True)
         self._per_e_edit.setEnabled(True)
         self._progress.setVisible(False)
-        from PyQt6.QtGui import QBrush
-        for item in self._running_list_items:
+        for i, item in enumerate(self._running_list_items):
             try:
                 f = item.font()
                 f.setBold(False)
                 item.setFont(f)
-                item.setForeground(QBrush())
+                if i < len(self._running_list_orig_colors):
+                    orig_bg, orig_fg = self._running_list_orig_colors[i]
+                    item.setBackground(orig_bg)
+                    item.setForeground(orig_fg)
             except RuntimeError:
                 pass  # item's C++ object was deleted (list refreshed during run)
-        self._running_list_items = []
+        self._running_list_items       = []
+        self._running_list_orig_colors = []
 
     def _move_to_energy(self):
         """Move all motors to the first selected energy row without running alignment scans."""
@@ -2137,13 +2143,25 @@ class AlignTab(QWidget):
         per_e    = max(1, getattr(self, '_per_e_repeat', 1))
         list_idx = row_idx // per_e
         from PyQt6.QtGui import QBrush, QColor
-        active_color = QColor("#ffa726")   # amber — visible over selection blue
+        active_bg = QBrush(QColor("#ffa726"))   # amber background — visible over any crystal color
+        active_fg = QBrush(QColor("#000000"))   # black text for contrast on amber
         for i, item in enumerate(self._running_list_items):
-            bold = (i == list_idx)
-            f = item.font()
-            f.setBold(bold)
-            item.setFont(f)
-            item.setForeground(QBrush(active_color) if bold else QBrush())
+            try:
+                f = item.font()
+                if i == list_idx:
+                    f.setBold(True)
+                    item.setFont(f)
+                    item.setBackground(active_bg)
+                    item.setForeground(active_fg)
+                else:
+                    f.setBold(False)
+                    item.setFont(f)
+                    if i < len(self._running_list_orig_colors):
+                        orig_bg, orig_fg = self._running_list_orig_colors[i]
+                        item.setBackground(orig_bg)
+                        item.setForeground(orig_fg)
+            except RuntimeError:
+                pass
 
     def _on_row_done(self, record: dict):
         self._results_table.setSortingEnabled(False)
