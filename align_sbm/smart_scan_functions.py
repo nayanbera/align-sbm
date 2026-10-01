@@ -2651,25 +2651,31 @@ def _set_energy_for_row(mono_e, table, mono_e_pv, harmonic_pv, und_e_pv,
 
 
 def _bpm_zero_scan(motor_pv, bpm_pv, search_step, max_steps, correction_sign,
-                   settle=0.5, log_fn=print, motor_name="", data_cb=None):
+                   settle=0.5, log_fn=print, motor_name="", data_cb=None,
+                   n_avg=1, avg_settle=0.1):
     """Walk a motor until the BPM signal crosses zero, then interpolate the exact position.
 
     correction_sign: -1 for X2/BPMX (motor moves opposite to BPM sign),
                      +1 for Roll2/BPMY (motor moves same direction as BPM sign).
+    n_avg: number of BPM readings to average at each step position (default 1).
+    avg_settle: seconds between averaged readings.
     data_cb: optional callable(positions, bpm_values, zero_pos) called when walk finishes.
     Returns (target_pos, success, final_bpm).  Does NOT move to target_pos — caller does.
     """
+    def _read_bpm():
+        return _bpm_average(bpm_pv, n_avg, settle=avg_settle,
+                            simulate=False, log_fn=log_fn)
+
     try:
         from epics import caget as _cg, caput as _cp
     except ImportError:
         log_fn(f"[BPM] pyepics unavailable — skipping {motor_name}\n")
         return (float("nan"), False, float("nan"))
 
-    f_a_raw = _cg(bpm_pv, use_monitor=False)
-    if f_a_raw is None:
+    f_a = _read_bpm()
+    if np.isnan(f_a):
         log_fn(f"[BPM] Cannot read {bpm_pv} — skipping {motor_name}\n")
         return (float("nan"), False, float("nan"))
-    f_a = float(f_a_raw)
 
     cur_raw = _cg(motor_pv + ".RBV", use_monitor=False)
     prev_pos = float(cur_raw if cur_raw is not None else 0.0)
@@ -2683,18 +2689,17 @@ def _bpm_zero_scan(motor_pv, bpm_pv, search_step, max_steps, correction_sign,
         return (prev_pos, True, f_a)
 
     step = correction_sign * np.sign(f_a) * abs(search_step)
-    log_fn(f"[BPM] {motor_name}: BPM={f_a:.4g}, step={step:+.4g}, max_steps={max_steps}\n")
+    log_fn(f"[BPM] {motor_name}: BPM={f_a:.4g}, step={step:+.4g}, max_steps={max_steps}, n_avg={n_avg}\n")
 
     prev_bpm = f_a
     for i in range(max_steps):
         nxt = prev_pos + step
         _cp(motor_pv, nxt, wait=True)
         time.sleep(settle)
-        fb_raw = _cg(bpm_pv, use_monitor=False)
-        if fb_raw is None:
+        nxt_bpm = _read_bpm()
+        if np.isnan(nxt_bpm):
             log_fn(f"[BPM] {motor_name}: lost BPM readback at step {i + 1}\n")
             break
-        nxt_bpm = float(fb_raw)
         positions.append(nxt)
         bpm_vals.append(nxt_bpm)
         log_fn(f"[BPM] {motor_name}: step {i + 1}: pos={nxt:.4g}, BPM={nxt_bpm:.4g}\n")
@@ -3562,6 +3567,7 @@ def align_beamline(
                         bpmmotor_x_search_step, bpmmotor_max_steps,
                         correction_sign=+1, settle=settle,
                         log_fn=_bpmc_log, motor_name="BPM-X motor",
+                        n_avg=bpm_navg,
                     )
                     if ok:
                         from epics import caput as _cp_bpmc
@@ -3584,6 +3590,7 @@ def align_beamline(
                         bpmmotor_y_search_step, bpmmotor_max_steps,
                         correction_sign=+1, settle=settle,
                         log_fn=_bpmc_log, motor_name="BPM-Y motor",
+                        n_avg=bpm_navg,
                     )
                     if ok:
                         from epics import caput as _cp_bpmc
@@ -3731,6 +3738,7 @@ def align_beamline(
                             log_fn=_bpm_log,
                             motor_name="X2",
                             data_cb=_x2_dcb,
+                            n_avg=bpm_navg,
                         )
                         if _ok_x and not np.isnan(x2_bpm_tgt):
                             _write_pv(x2_motor, x2_bpm_tgt, f"X2 → {x2_bpm_tgt:.4g}")
@@ -3821,6 +3829,7 @@ def align_beamline(
                             log_fn=_bpm_log,
                             motor_name="Roll2",
                             data_cb=_r2_dcb,
+                            n_avg=bpm_navg,
                         )
                         if _ok_y and not np.isnan(roll2_bpm_tgt):
                             _write_pv(roll2_motor, roll2_bpm_tgt,
