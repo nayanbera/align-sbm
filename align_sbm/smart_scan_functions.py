@@ -133,6 +133,10 @@ def _eval_condition(actual, op: str, value_str: str) -> bool:
 
 # ── Result / status types ────────────────────────────────────────────────────
 
+class _SkipBeamAlign(Exception):
+    """Sentinel raised inside the alignment try-block to skip to step h."""
+
+
 class ScanStatus(Enum):
     SUCCESS          = "success"
     NO_PEAK          = "no_peak"
@@ -2984,6 +2988,7 @@ def align_beamline(
     bpmmotor_max_steps      : int   = 20,
     bpmmotor_x_tolerance    : float = 10.0,
     bpmmotor_y_tolerance    : float = 10.0,
+    do_beam_align           : bool  = True,
 ) -> list:
     """
     Run a full beamline alignment sequence for every energy row in *table*.
@@ -3258,6 +3263,8 @@ def align_beamline(
         r_brg2 = r_pitch = r_roll2 = r_x2 = None
         _row_ok = True
         try:
+            if not do_beam_align:
+                raise _SkipBeamAlign()
             # ── Set energy ────────────────────────────────────────────────────
             if verbose:
                 print(f"\n  Setting energy …")
@@ -3473,6 +3480,12 @@ def align_beamline(
                 if verbose:
                     print("    [SIM] X2 smart_scan skipped")
             if step_cb: step_cb("X2 scan")
+
+        except _SkipBeamAlign:
+            if verbose:
+                print(f"\n  (Beam alignment skipped — reading current motor RBVs)")
+            record["Roll2"] = _read_pv(roll2_motor)
+            record["X2"]    = _read_pv(x2_motor)
 
         except KeyboardInterrupt:
             if verbose:

@@ -899,6 +899,14 @@ class AlignTab(QWidget):
         per_e_row.addStretch()
         rv.addLayout(per_e_row)
 
+        self._beam_align_cb = QCheckBox("Enable Beam Alignment")
+        self._beam_align_cb.setChecked(True)
+        self._beam_align_cb.setToolTip(
+            "Run the main beam alignment sequence (BRG2, Pitch, Roll2, X2 scans).\n"
+            "When unchecked, the current motor RBVs are read and saved to CSV instead."
+        )
+        rv.addWidget(self._beam_align_cb)
+
         self._bpm_cal_cb = QCheckBox("Enable Beam Position Calibration")
         self._bpm_cal_cb.setChecked(False)
         self._bpm_cal_cb.setToolTip(
@@ -1925,6 +1933,7 @@ class AlignTab(QWidget):
         kwargs   = self._setup_tab.get_kwargs()
 
         # BPM scan params come from setup tab get_kwargs(); just set the enable flags
+        kwargs["do_beam_align"] = self._beam_align_cb.isChecked()
         kwargs["bpm_align"]     = self._bpm_cb.isChecked()
         kwargs["bpm_motor_cal"] = self._bpm_cal_cb.isChecked()
 
