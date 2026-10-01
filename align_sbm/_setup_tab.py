@@ -656,7 +656,7 @@ class SetupTab(QWidget):
 
         vbox.addWidget(bpm_scan_grp)
 
-        bpmcal_grp = QGroupBox("BPM Motor Calibration Parameters")
+        bpmcal_grp = QGroupBox("BPM Position Calibration Parameters")
         bpmcal_grp.setToolTip(
             "Parameters for centering and calibrating the dedicated BPM-X/Y motors.\n"
             "Runs automatically after the X2 scan when BPM motor PVs are configured."
