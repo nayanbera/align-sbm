@@ -3642,7 +3642,7 @@ def align_beamline(
                         _cp_s(_sx_pv, record["new_scale_x"], wait=True)
                         if verbose:
                             print(f"    → wrote new_scale_x={record['new_scale_x']:.4g} to {_sx_pv}")
-                    _cp_s(_bpmx_mot, 0.0, wait=True)
+                    _cp_s(_bpmx_mot, bpmmotor_x_pos, wait=True)
                     time.sleep(settle)
                 if step_cb: step_cb("BPM-X scale")
 
@@ -3673,7 +3673,7 @@ def align_beamline(
                         _cp_s(_sy_pv, record["new_scale_y"], wait=True)
                         if verbose:
                             print(f"    → wrote new_scale_y={record['new_scale_y']:.4g} to {_sy_pv}")
-                    _cp_s(_bpmy_mot, 0.0, wait=True)
+                    _cp_s(_bpmy_mot, bpmmotor_y_pos, wait=True)
                     time.sleep(settle)
                 if step_cb: step_cb("BPM-Y scale")
 
