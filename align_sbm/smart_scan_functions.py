@@ -3610,11 +3610,11 @@ def align_beamline(
                     record["new_scale_x"] = 98.5
                 else:
                     from epics import caget as _cg_s, caput as _cp_s
-                    _cp_s(_bpmx_mot, 0.0, wait=True)
-                    time.sleep(settle)
                     abpmx_base = _bpm_average(_bpmc_x_pv, bpm_navg, settle=0.1,
                                               simulate=False, log_fn=_bpmc_log)
-                    _cp_s(_bpmx_mot, 0.1, wait=True)
+                    cur_x = _cg_s(_bpmx_mot + ".RBV", use_monitor=False)
+                    cur_x = float(cur_x) if cur_x is not None else 0.0
+                    _cp_s(_bpmx_mot, cur_x + 0.1, wait=True)
                     time.sleep(settle)
                     bpmx_at_01 = _bpm_average(_bpmc_x_pv, bpm_navg, settle=0.1,
                                               simulate=False, log_fn=_bpmc_log)
@@ -3641,11 +3641,11 @@ def align_beamline(
                     record["new_scale_y"] = 98.5
                 else:
                     from epics import caget as _cg_s, caput as _cp_s
-                    _cp_s(_bpmy_mot, 0.0, wait=True)
-                    time.sleep(settle)
                     abpmy_base = _bpm_average(_bpmc_y_pv, bpm_navg, settle=0.1,
                                               simulate=False, log_fn=_bpmc_log)
-                    _cp_s(_bpmy_mot, 0.1, wait=True)
+                    cur_y = _cg_s(_bpmy_mot + ".RBV", use_monitor=False)
+                    cur_y = float(cur_y) if cur_y is not None else 0.0
+                    _cp_s(_bpmy_mot, cur_y + 0.1, wait=True)
                     time.sleep(settle)
                     bpmy_at_01 = _bpm_average(_bpmc_y_pv, bpm_navg, settle=0.1,
                                               simulate=False, log_fn=_bpmc_log)
