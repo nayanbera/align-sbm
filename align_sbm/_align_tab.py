@@ -2,7 +2,7 @@
 import numpy as np
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIntValidator, QIcon
+from PyQt6.QtGui import QFont, QIntValidator, QIcon, QColor
 from PyQt6.QtWidgets import QStyle
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QPlainTextEdit, QListWidget, QListWidgetItem,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox,
-    QAbstractItemView,
+    QAbstractItemView, QTableView,
 )
 from .smart_scan_functions import ScanStatus
 from ._hold_widget import HoldConditionsWidget
@@ -31,6 +31,194 @@ class _SortableItem(QTableWidgetItem):
             return float(self.text()) < float(other.text())
         except ValueError:
             return super().__lt__(other)
+
+
+class _CsvHeader(QHeaderView):
+    """Horizontal header for the CSV table.
+
+    Plain click keeps the normal behaviour (sort).  Ctrl/Cmd+click toggles a column's
+    selection and Shift+click extends it; selected columns are tinted.  On the frozen
+    overlay header a plain click sorts the main table.
+    """
+    _TINT = QColor(66, 133, 244, 90)
+
+    def __init__(self, table, frozen=False):
+        super().__init__(Qt.Orientation.Horizontal)
+        self._table = table
+        self._frozen = frozen
+        self._swallow = False
+        self.setSectionsClickable(True)
+
+    def mousePressEvent(self, e):
+        sec = self.logicalIndexAt(e.position().toPoint())
+        if sec >= 0 and e.button() == Qt.MouseButton.LeftButton:
+            mods = e.modifiers()
+            ctrl  = bool(mods & Qt.KeyboardModifier.ControlModifier)
+            shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+            if ctrl or shift:
+                self._table.select_column(sec, extend=shift and not ctrl)
+                self._swallow = True
+                e.accept()
+                return
+            if self._frozen:
+                self._table.toggle_sort(sec)
+                self._swallow = True
+                e.accept()
+                return
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if self._swallow:
+            self._swallow = False
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
+
+    def paintSection(self, painter, rect, logical):
+        super().paintSection(painter, rect, logical)
+        if self._table.is_column_selected(logical):
+            painter.save()
+            painter.fillRect(rect, self._TINT)
+            painter.restore()
+
+
+class _CsvTable(QTableWidget):
+    """CSV table with header column selection and N always-visible (frozen) left columns.
+
+    The frozen columns are drawn by a second QTableView that shares this table's model and
+    selection model and sits on top of the left edge of the viewport, so they stay put while
+    the table is scrolled horizontally.
+    """
+    columns_selection_changed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(0, 0, parent)
+        self._sel_cols: set = set()
+        self._col_anchor = None
+        self._frozen_n = 0
+        self.setHorizontalHeader(_CsvHeader(self))
+
+        fz = QTableView(self)
+        fz.setHorizontalHeader(_CsvHeader(self, frozen=True))
+        fz.setModel(self.model())
+        fz.setSelectionModel(self.selectionModel())
+        fz.verticalHeader().hide()
+        fz.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        fz.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        fz.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        fz.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
+        fz.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        fz.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        fz.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        fz.horizontalHeader().setSortIndicatorShown(True)
+        fz.setStyleSheet("QTableView { border: none; border-right: 2px solid #777; }")
+        fz.hide()
+        self._frozen = fz
+        self.viewport().stackUnder(fz)
+
+        self.verticalScrollBar().valueChanged.connect(fz.verticalScrollBar().setValue)
+        fz.verticalScrollBar().valueChanged.connect(self.verticalScrollBar().setValue)
+        self.horizontalHeader().sectionResized.connect(self._on_section_resized)
+        self.verticalHeader().sectionResized.connect(
+            lambda row, _old, new: fz.setRowHeight(row, new))
+        self.horizontalHeader().sortIndicatorChanged.connect(
+            lambda sec, order: fz.horizontalHeader().setSortIndicator(sec, order))
+
+    # ── frozen columns ───────────────────────────────────────────────────────
+
+    def set_frozen_count(self, n: int):
+        self._frozen_n = max(0, int(n))
+        self.refresh_frozen()
+
+    def refresh_frozen(self):
+        """Re-apply the frozen column count (call after the columns change)."""
+        fz = self._frozen
+        n = min(self._frozen_n, self.columnCount())
+        if n <= 0:
+            fz.hide()
+            return
+        for c in range(self.columnCount()):
+            hide = c >= n
+            if fz.isColumnHidden(c) != hide:
+                fz.setColumnHidden(c, hide)
+        for c in range(n):
+            fz.setColumnWidth(c, self.columnWidth(c))
+        if fz.font() != self.font():
+            fz.setFont(self.font())
+        hh = self.horizontalHeader().height()
+        fz.horizontalHeader().setFixedHeight(hh)
+        fz.setGeometry(
+            self.verticalHeader().width() + self.frameWidth(), self.frameWidth(),
+            sum(self.columnWidth(c) for c in range(n)),
+            self.viewport().height() + hh,
+        )
+        fz.show()
+        fz.raise_()
+
+    def _on_section_resized(self, logical, _old, new):
+        if logical < self._frozen_n:
+            self.refresh_frozen()
+
+    def updateGeometries(self):
+        super().updateGeometries()
+        if hasattr(self, "_frozen"):
+            self.refresh_frozen()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.refresh_frozen()
+
+    def toggle_sort(self, col: int):
+        """Sort by *col* as if its header had been clicked (used by the frozen header)."""
+        h = self.horizontalHeader()
+        asc = Qt.SortOrder.AscendingOrder
+        order = (Qt.SortOrder.DescendingOrder
+                 if h.sortIndicatorSection() == col and h.sortIndicatorOrder() == asc
+                 else asc)
+        h.setSortIndicator(col, order)
+
+    # ── column selection ─────────────────────────────────────────────────────
+
+    def column_name(self, col: int) -> str:
+        item = self.horizontalHeaderItem(col)
+        return item.text() if item else ""
+
+    def is_column_selected(self, col: int) -> bool:
+        return self.column_name(col) in self._sel_cols
+
+    def selected_column_names(self) -> list:
+        return [self.column_name(c) for c in range(self.columnCount())
+                if self.column_name(c) in self._sel_cols]
+
+    def select_column(self, col: int, extend: bool = False):
+        name = self.column_name(col)
+        if not name:
+            return
+        if extend and self._col_anchor is not None:
+            lo, hi = sorted((self._col_anchor, col))
+            self._sel_cols |= {self.column_name(c) for c in range(lo, hi + 1)}
+        else:
+            self._sel_cols ^= {name}
+            self._col_anchor = col
+        self._selection_changed()
+
+    def clear_column_selection(self):
+        self._sel_cols.clear()
+        self._col_anchor = None
+        self._selection_changed()
+
+    def prune_column_selection(self):
+        """Drop selected names that no longer exist (after the CSV is reloaded)."""
+        present = {self.column_name(c) for c in range(self.columnCount())}
+        if not self._sel_cols <= present:
+            self._sel_cols &= present
+        self._col_anchor = None
+        self._selection_changed()
+
+    def _selection_changed(self):
+        self.horizontalHeader().viewport().update()
+        self._frozen.horizontalHeader().viewport().update()
+        self.columns_selection_changed.emit()
 
 
 class _MoveToEnergyThread(QThread):
@@ -1162,6 +1350,15 @@ class AlignTab(QWidget):
         self._csv_path_lbl.setStyleSheet("color: #888; font-size: 10px;")
         self._csv_path_lbl.setWordWrap(True)
         csv_hdr.addWidget(self._csv_path_lbl, 1)
+        csv_hdr.addWidget(QLabel("Freeze cols:"))
+        self._freeze_edit = QLineEdit("0")
+        self._freeze_edit.setFixedWidth(36)
+        self._freeze_edit.setValidator(QIntValidator(0, 50, self))
+        self._freeze_edit.setToolTip(
+            "Keep the first N columns always visible while scrolling the table horizontally\n"
+            "(0 = none)."
+        )
+        csv_hdr.addWidget(self._freeze_edit)
         open_csv_btn = QPushButton("Open CSV…")
         open_csv_btn.setToolTip(
             "Open an existing CSV file to append new results to it.\n"
@@ -1177,6 +1374,20 @@ class AlignTab(QWidget):
         )
         add_col_btn.clicked.connect(self._add_csv_column)
         csv_hdr.addWidget(add_col_btn)
+        self._remove_cols_btn = QPushButton("Remove Column(s)")
+        self._remove_cols_btn.setToolTip(
+            "Permanently remove the selected columns from the CSV file.\n"
+            "Select columns by Ctrl+click (⌘+click on macOS) on their headers;\n"
+            "Shift+click extends the selection. Enabled only when columns are selected."
+        )
+        self._remove_cols_btn.setEnabled(False)
+        self._remove_cols_btn.setStyleSheet(
+            "QPushButton { color: #ef5350; }"
+            "QPushButton:hover { color: #e53935; }"
+            "QPushButton:disabled { color: #777; }"
+        )
+        self._remove_cols_btn.clicked.connect(self._remove_csv_columns)
+        csv_hdr.addWidget(self._remove_cols_btn)
         del_btn = QPushButton("Delete Row(s)")
         del_btn.setToolTip("Permanently remove selected rows from the CSV file")
         del_btn.setStyleSheet(
@@ -1228,7 +1439,7 @@ class AlignTab(QWidget):
         color_hdr.addLayout(self._color_legend_layout, 1)
         cv.addLayout(color_hdr)
 
-        self._csv_table = QTableWidget(0, 0)
+        self._csv_table = _CsvTable()
         self._csv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._csv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._csv_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
@@ -1240,6 +1451,16 @@ class AlignTab(QWidget):
         self._csv_table.setFont(
             QFont("Menlo" if "darwin" in __import__("sys").platform else "Consolas", 9)
         )
+        self._csv_table.columns_selection_changed.connect(
+            lambda: self._remove_cols_btn.setEnabled(
+                bool(self._csv_table.selected_column_names())))
+        if self._settings:
+            try:
+                self._freeze_edit.setText(str(int(self._settings.value("csv_frozen_cols", 0))))
+            except (TypeError, ValueError):
+                pass
+        self._freeze_edit.textChanged.connect(self._on_freeze_changed)
+        self._on_freeze_changed(self._freeze_edit.text())
         cv.addWidget(self._csv_table)
         self._bottom_tabs.addTab(csv_frame, "CSV")
 
@@ -1357,6 +1578,18 @@ class AlignTab(QWidget):
         self._csv_table.scrollToBottom()
         self._csv_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents)
+        for c, name in enumerate(headers):
+            hi = self._csv_table.horizontalHeaderItem(c)
+            if hi:
+                hi.setToolTip(
+                    f"{name}\n"
+                    "Click: sort (click again to reverse)\n"
+                    "Ctrl/⌘+click: select / deselect column\n"
+                    "Shift+click: extend selection to this column\n"
+                    "Selected columns can be removed with Remove Column(s)"
+                )
+        self._csv_table.prune_column_selection()
+        self._csv_table.refresh_frozen()
 
         # Update color-by combobox, preserving the current selection if still valid
         if hasattr(self, '_color_col_combo'):
@@ -1410,6 +1643,61 @@ class AlignTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Delete Rows", f"Could not write file:\n{e}")
             return
+        self._refresh_csv()
+
+    def _on_freeze_changed(self, text: str):
+        try:
+            n = int(text)
+        except ValueError:
+            n = 0
+        self._csv_table.set_frozen_count(n)
+        if self._settings:
+            self._settings.setValue("csv_frozen_cols", n)
+
+    def _remove_csv_columns(self):
+        """Permanently remove the selected columns from the CSV file (after confirmation)."""
+        import csv, os
+        names = self._csv_table.selected_column_names()
+        if not names:
+            return
+        path = self._csv_path
+        if not path or not os.path.isfile(path):
+            QMessageBox.warning(self, "Remove Columns", "No CSV file is currently open.")
+            return
+        shown = "\n".join(f"  •  {n}" for n in names[:15])
+        if len(names) > 15:
+            shown += f"\n  … and {len(names) - 15} more"
+        reply = QMessageBox.warning(
+            self, "Remove Columns",
+            f"Permanently remove {len(names)} column(s) and all their data from:\n{path}\n\n"
+            f"{shown}\n\n"
+            "This cannot be undone.\n"
+            "Columns still listed under Record PVs in the Setup tab will be added back "
+            "at the next alignment run.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            with open(path, newline="") as f:
+                rows = list(csv.reader(f))
+        except Exception as e:
+            QMessageBox.critical(self, "Remove Columns", f"Could not read file:\n{e}")
+            return
+        if not rows:
+            return
+        drop = set(names)
+        keep = [i for i, h in enumerate(rows[0]) if h not in drop]
+        try:
+            with open(path, "w", newline="") as f:
+                writer = csv.writer(f)
+                for r in rows:
+                    writer.writerow([r[i] for i in keep if i < len(r)])
+        except Exception as e:
+            QMessageBox.critical(self, "Remove Columns", f"Could not write file:\n{e}")
+            return
+        self._csv_table.clear_column_selection()
         self._refresh_csv()
 
     def _analyze_csv(self):
