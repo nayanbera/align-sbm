@@ -2542,15 +2542,15 @@ class AlignTab(QWidget):
         self._beam_align_cb.setToolTip(self._steps_tooltip(
             "Run the main beam alignment sequence (BRG2, Pitch, Roll2, X2 scans):",
             [
-                ("a)",  "Open slits",                                     True),
-                ("b)",  "Home pitch piezo",                               True),
-                ("c)",  "BRG2 smart scan → move to peak",                 True),
-                ("d)",  "Pitch fly scan",                                 pitch_on),
-                ("e)",  "Close vertical slit",                            True),
-                ("f)",  "Roll2 smart scan → move to centroid",            True),
-                ("f2)", "Pitch fly scan (repeat)",                        pitch_on),
-                ("g)",  "Close horizontal slit, then X2 smart scan → move to centroid", True),
-                ("h)",  "Read final RBVs and write CSV row",              True),
+                ("1a)",  "Open slits",                                     True),
+                ("1b)",  "Home pitch piezo",                               True),
+                ("1c)",  "BRG2 smart scan → move to peak",                 True),
+                ("1d)",  "Pitch fly scan",                                 pitch_on),
+                ("1e)",  "Close vertical slit",                            True),
+                ("1f)",  "Roll2 smart scan → move to centroid",            True),
+                ("1f2)", "Pitch fly scan (repeat)",                        pitch_on),
+                ("1g)",  "Close horizontal slit, then X2 smart scan → move to centroid", True),
+                ("1h)",  "Read final RBVs and write CSV row",              True),
             ],
             "When unchecked, the current motor RBVs are read and saved to CSV instead.",
         ))
@@ -2558,14 +2558,14 @@ class AlignTab(QWidget):
         x_mot, y_mot = pv("bpmx_motor"), pv("bpmy_motor")
         x_pv,  y_pv  = pv("bpm_x_pv"),   pv("bpm_y_pv")
         self._bpm_cal_cb.setToolTip(self._steps_tooltip(
-            "Run BPM motor centering and scale calibration after the main alignment (step h):",
+            "Run BPM motor centering and scale calibration after the main alignment (step 1h):",
             [
-                ("o)", "Walk BPM-X motor until BPM X crosses zero",                x_mot and x_pv),
-                ("p)", "Walk BPM-Y motor until BPM Y crosses zero",                y_mot and y_pv),
-                ("q)", "Calibrate BPM X scale factor (move 0.1 mm, measure, compute new_scale_x)",
+                ("2a)", "Walk BPM-X motor until BPM X crosses zero",                x_mot and x_pv),
+                ("2b)", "Walk BPM-Y motor until BPM Y crosses zero",                y_mot and y_pv),
+                ("2c)", "Calibrate BPM X scale factor (move 0.1 mm, measure, compute new_scale_x)",
                                                                                    x_mot and x_pv and pv("scale_x_pv")),
-                ("r)", "Calibrate BPM Y scale factor",                             y_mot and y_pv and pv("scale_y_pv")),
-                ("s)", "Move both motors to 0, record abpmx / abpmy",              x_mot or y_mot),
+                ("2d)", "Calibrate BPM Y scale factor",                             y_mot and y_pv and pv("scale_y_pv")),
+                ("2e)", "Move both motors to 0, record abpmx / abpmy",              x_mot or y_mot),
             ],
             "Requires BPM Motor PVs to be set in Setup → Motors &amp; PVs.",
         ))
@@ -2573,13 +2573,13 @@ class AlignTab(QWidget):
         self._bpm_cb.setToolTip(self._steps_tooltip(
             "Run an additional BPM position alignment phase after each energy row:",
             [
-                ("i)", "Open slits (size set in Setup → Scan Parameters → BPM Alignment)", True),
-                ("j)", "Walk X2 until BPMX crosses zero",                         x_pv),
-                ("k)", "Fine BRG2 rescan",                                        True),
-                ("l)", "Walk Roll2 until BPMY crosses zero",                      y_pv),
-                ("m)", "Record BPM results (adds X2_bpm, Roll2_bpm, BRG2_bpm columns)", True),
-                ("n)", "Slit V center scan (needs Slit V center PV)",             pv("slit_v_center_pv")),
-                ("o)", "Slit H center scan (needs Slit H center PV)",             pv("slit_h_center_pv")),
+                ("3a)", "Open slits (size set in Setup → Scan Parameters → BPM Alignment)", True),
+                ("3b)", "Walk X2 until BPMX crosses zero",                         x_pv),
+                ("3c)", "Fine BRG2 rescan",                                        True),
+                ("3d)", "Walk Roll2 until BPMY crosses zero",                      y_pv),
+                ("3e)", "Record BPM results (adds X2_bpm, Roll2_bpm, BRG2_bpm columns)", True),
+                ("3f)", "Slit V center scan, horizontal slit opened (needs Slit V center PV)",             pv("slit_v_center_pv")),
+                ("3g)", "Slit H center scan, vertical slit opened (needs Slit H center PV)",             pv("slit_h_center_pv")),
             ],
             "Requires BPM X / Y PVs to be set in Setup → Motors &amp; PVs.",
         ))

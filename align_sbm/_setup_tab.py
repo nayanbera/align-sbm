@@ -293,7 +293,7 @@ class SetupTab(QWidget):
         # Slit V center motors (for BPM-phase slit scan)
         slitv_grp = QGroupBox("Slit V Center Motors  ·  current value →")
         slitv_grp.setToolTip(
-            "Motor PVs for the vertical slit center scan — step n of the BPM alignment phase.\n"
+            "Motor PVs for the vertical slit center scan — step 3f of the BPM alignment phase.\n"
             "The center PV is the scan axis; top and bottom blade RBVs are recorded in the CSV."
         )
         slitvf = QFormLayout(slitv_grp)
@@ -311,7 +311,7 @@ class SetupTab(QWidget):
         # Slit H center motors (for BPM-phase slit scan)
         slith_grp = QGroupBox("Slit H Center Motors  ·  current value →")
         slith_grp.setToolTip(
-            "Motor PVs for the horizontal slit center scan — step o of the BPM alignment phase.\n"
+            "Motor PVs for the horizontal slit center scan — step 3g of the BPM alignment phase.\n"
             "The center PV is the scan axis; left and right blade RBVs are recorded in the CSV."
         )
         slithf = QFormLayout(slith_grp)

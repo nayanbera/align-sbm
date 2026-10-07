@@ -134,7 +134,7 @@ def _eval_condition(actual, op: str, value_str: str) -> bool:
 # ── Result / status types ────────────────────────────────────────────────────
 
 class _SkipBeamAlign(Exception):
-    """Sentinel raised inside the alignment try-block to skip to step h."""
+    """Sentinel raised inside the alignment try-block to skip to step 1h."""
 
 
 class ScanStatus(Enum):
@@ -3002,16 +3002,16 @@ def align_beamline(
     Run a full beamline alignment sequence for every energy row in *table*.
 
     For each row the sequence is:
-      a) Open slits
-      b) Home pitch piezo
-      c) smart_scan BRG2  → move to peak_pos
-      d) fly_scan pitch   → move to peak
-      e) Close vertical slit
-      f) smart_scan Roll2 → move to centroid
-      f2) fly_scan pitch repeat
-      g-pre) Close horizontal slit
-      g) smart_scan X2    → move to centroid
-      h) Read final RBV of Roll2, X2, and all record_pvs; write CSV row
+      1a) Open slits
+      1b) Home pitch piezo
+      1c) smart_scan BRG2  → move to peak_pos
+      1d) fly_scan pitch   → move to peak
+      1e) Close vertical slit
+      1f) smart_scan Roll2 → move to centroid
+      1f2) fly_scan pitch repeat
+      1g-pre) Close horizontal slit
+      1g) smart_scan X2    → move to centroid
+      1h) Read final RBV of Roll2, X2, and all record_pvs; write CSV row
 
     CSV columns (in order):
       datetime | MonoE | Harmonic | UndE | Roll2 | X2 | <record_pvs keys>
@@ -3259,7 +3259,7 @@ def align_beamline(
                   f"Harmonic={harmonic}  UndE={und_e}")
             print(sep)
 
-        # record starts with energy table values; Roll2/X2 overwritten at step h
+        # record starts with energy table values; Roll2/X2 overwritten at step 1h
         record = {
             "datetime": "",
             "MonoE"   : mono_e,
@@ -3291,24 +3291,24 @@ def align_beamline(
             )
             if step_cb: step_cb("Set energy")
 
-            # ── a) Open slits ─────────────────────────────────────────────────
+            # ── 1a) Open slits ─────────────────────────────────────────────────
             if verbose:
-                print(f"\n  a) Opening slits: V={slit_open_v}  H={slit_open_h}")
+                print(f"\n  1a) Opening slits: V={slit_open_v}  H={slit_open_h}")
             _write_pv(slit_v, slit_open_v, f"slit_v → {slit_open_v}")
             _write_pv(slit_h, slit_open_h, f"slit_h → {slit_open_h}")
             time.sleep(5.0)
             if step_cb: step_cb("Open slits")
 
-            # ── b) Home pitch piezo ───────────────────────────────────────────
+            # ── 1b) Home pitch piezo ───────────────────────────────────────────
             if verbose:
-                print(f"\n  b) Setting pitch piezo to {pitch_home}")
+                print(f"\n  1b) Setting pitch piezo to {pitch_home}")
             _write_pv(pitch, pitch_home, f"pitch → {pitch_home}")
             time.sleep(pitch_settle * 3)
             if step_cb: step_cb("Home pitch")
 
-            # ── c) BRG2 smart_scan → move to peak_pos ────────────────────────
+            # ── 1c) BRG2 smart_scan → move to peak_pos ────────────────────────
             if verbose:
-                print(f"\n  c) BRG2 smart_scan  [{brg2_start:+g} … {brg2_stop:+g}  "
+                print(f"\n  1c) BRG2 smart_scan  [{brg2_start:+g} … {brg2_stop:+g}  "
                       f"{brg2_nsteps} steps]")
             if not simulate:
                 r_brg2 = smart_scan(
@@ -3336,10 +3336,10 @@ def align_beamline(
                     print("    [SIM] BRG2 smart_scan skipped")
             if step_cb: step_cb("BRG2 scan")
 
-            # ── d) Pitch fly_scan ─────────────────────────────────────────────
+            # ── 1d) Pitch fly_scan ─────────────────────────────────────────────
             if do_pitch_scan:
                 if verbose:
-                    print(f"\n  d) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
+                    print(f"\n  1d) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
                           f"{pitch_nsteps} steps]")
                 if not simulate:
                     r_pitch = fly_scan(
@@ -3374,18 +3374,18 @@ def align_beamline(
                 if step_cb: step_cb("Pitch scan")
             else:
                 if verbose:
-                    print("\n  d) Pitch scan disabled – skipping")
+                    print("\n  1d) Pitch scan disabled – skipping")
 
-            # ── e) Close vertical slit ────────────────────────────────────────
+            # ── 1e) Close vertical slit ────────────────────────────────────────
             if verbose:
-                print(f"\n  e) Closing vertical slit: V={slit_close_v}")
+                print(f"\n  1e) Closing vertical slit: V={slit_close_v}")
             _write_pv(slit_v, slit_close_v, f"slit_v → {slit_close_v}")
             time.sleep(5.0)
             if step_cb: step_cb("Close V slit")
 
-            # ── f) Roll2 smart_scan → move to centroid ────────────────────────
+            # ── 1f) Roll2 smart_scan → move to centroid ────────────────────────
             if verbose:
-                print(f"\n  f) Roll2 smart_scan  [{roll2_start:+g} … {roll2_stop:+g}  "
+                print(f"\n  1f) Roll2 smart_scan  [{roll2_start:+g} … {roll2_stop:+g}  "
                       f"{roll2_nsteps} steps]")
             if not simulate:
                 r_roll2 = smart_scan(
@@ -3412,10 +3412,10 @@ def align_beamline(
                     print("    [SIM] Roll2 smart_scan skipped")
             if step_cb: step_cb("Roll2 scan")
 
-            # ── f2) Pitch fly_scan repeat ─────────────────────────────────────
+            # ── 1f2) Pitch fly_scan repeat ─────────────────────────────────────
             if do_pitch_scan:
                 if verbose:
-                    print(f"\n  f2) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
+                    print(f"\n  1f2) Pitch fly_scan  [{pitch_start:+g} … {pitch_stop:+g}  "
                           f"{pitch_nsteps} steps]")
                 if not simulate:
                     r_pitch2 = fly_scan(
@@ -3445,25 +3445,25 @@ def align_beamline(
                             _write_pv(pitch, pitch_best2, "pitch")
                             time.sleep(pitch_settle * 3)
                     if verbose:
-                        print(f"    Pitch (f2): {r_pitch2.status.value}")
+                        print(f"    Pitch (1f2): {r_pitch2.status.value}")
                 else:
                     if verbose:
-                        print("    [SIM] Pitch fly_scan (f2) skipped")
+                        print("    [SIM] Pitch fly_scan (1f2) skipped")
                 if step_cb: step_cb("Pitch scan 2")
             else:
                 if verbose:
-                    print("\n  f2) Pitch scan disabled – skipping")
+                    print("\n  1f2) Pitch scan disabled – skipping")
 
-            # ── g-pre) Close horizontal slit ──────────────────────────────────
+            # ── 1g-pre) Close horizontal slit ──────────────────────────────────
             if verbose:
-                print(f"\n  g-pre) Closing horizontal slit: H={slit_close_h}")
+                print(f"\n  1g-pre) Closing horizontal slit: H={slit_close_h}")
             _write_pv(slit_h, slit_close_h, f"slit_h → {slit_close_h}")
             time.sleep(5.0)
             if step_cb: step_cb("Close H slit")
 
-            # ── g) X2 smart_scan → move to centroid ───────────────────────────
+            # ── 1g) X2 smart_scan → move to centroid ───────────────────────────
             if verbose:
-                print(f"\n  g) X2 smart_scan  [{x2_start:+g} … {x2_stop:+g}  "
+                print(f"\n  1g) X2 smart_scan  [{x2_start:+g} … {x2_stop:+g}  "
                       f"{x2_nsteps} steps]")
             if not simulate:
                 r_x2 = smart_scan(
@@ -3522,9 +3522,9 @@ def align_beamline(
                 print(f"\n  ✗ Error at MonoE={mono_e} keV: {exc}")
                 print(_tb.format_exc())
 
-        # ── h) Read final RBV values and write CSV row ────────────────────────
+        # ── 1h) Read final RBV values and write CSV row ────────────────────────
         if verbose:
-            print(f"\n  h) Recording optimised values …")
+            print(f"\n  1h) Recording optimised values …")
         if record_settle > 0 and not simulate:
             if verbose:
                 print(f"  Waiting {record_settle}s for motors/detector to settle …")
@@ -3581,9 +3581,9 @@ def align_beamline(
             def _bpmc_log(msg):
                 if verbose: print(msg, end="")
 
-            # ── o) BPM-X motor zero-crossing centering ────────────────────
+            # ── 2a) BPM-X motor zero-crossing centering ────────────────────
             if _bpmx_mot and _bpmc_x_pv:
-                if verbose: print(f"\n  o) BPM-X motor centering  [{_bpmx_mot}]")
+                if verbose: print(f"\n  2a) BPM-X motor centering  [{_bpmx_mot}]")
                 if simulate:
                     bpmmotor_x_pos = 0.0
                 else:
@@ -3604,9 +3604,9 @@ def align_beamline(
                 record["bpmmotor_x_pos"] = bpmmotor_x_pos
                 if step_cb: step_cb("BPM-X center")
 
-            # ── p) BPM-Y motor zero-crossing centering ────────────────────
+            # ── 2b) BPM-Y motor zero-crossing centering ────────────────────
             if _bpmy_mot and _bpmc_y_pv:
-                if verbose: print(f"\n  p) BPM-Y motor centering  [{_bpmy_mot}]")
+                if verbose: print(f"\n  2b) BPM-Y motor centering  [{_bpmy_mot}]")
                 if simulate:
                     bpmmotor_y_pos = 0.0
                 else:
@@ -3627,10 +3627,10 @@ def align_beamline(
                 record["bpmmotor_y_pos"] = bpmmotor_y_pos
                 if step_cb: step_cb("BPM-Y center")
 
-            # ── q) BPM-X scale factor calibration ────────────────────────
+            # ── 2c) BPM-X scale factor calibration ────────────────────────
             _sx_pv = str(scale_x_pv or "").strip()
             if _bpmx_mot and _bpmc_x_pv and _sx_pv:
-                if verbose: print(f"\n  q) BPM-X scale factor calibration")
+                if verbose: print(f"\n  2c) BPM-X scale factor calibration")
                 if simulate:
                     record["new_scale_x"] = 98.5
                 else:
@@ -3658,10 +3658,10 @@ def align_beamline(
                     time.sleep(settle)
                 if step_cb: step_cb("BPM-X scale")
 
-            # ── r) BPM-Y scale factor calibration ────────────────────────
+            # ── 2d) BPM-Y scale factor calibration ────────────────────────
             _sy_pv = str(scale_y_pv or "").strip()
             if _bpmy_mot and _bpmc_y_pv and _sy_pv:
-                if verbose: print(f"\n  r) BPM-Y scale factor calibration")
+                if verbose: print(f"\n  2d) BPM-Y scale factor calibration")
                 if simulate:
                     record["new_scale_y"] = 98.5
                 else:
@@ -3689,8 +3689,8 @@ def align_beamline(
                     time.sleep(settle)
                 if step_cb: step_cb("BPM-Y scale")
 
-            # ── s) Move both to 0, record abpmx / abpmy ──────────────────
-            if verbose: print(f"\n  s) BPM motors → 0, record abpmx/abpmy")
+            # ── 2e) Move both to 0, record abpmx / abpmy ──────────────────
+            if verbose: print(f"\n  2e) BPM motors → 0, record abpmx/abpmy")
             if not simulate:
                 from epics import caput as _cp_s
                 if _bpmx_mot:
@@ -3726,15 +3726,15 @@ def align_beamline(
                 print(f"  BPM alignment phase")
                 print(f"  {'─'*56}")
 
-            # ── i) Open slits to bpm_slit_open × bpm_slit_open ───────────────
+            # ── 3a) Open slits to bpm_slit_open × bpm_slit_open ───────────────
             if verbose:
-                print(f"\n  i) Opening slits: V={bpm_slit_open}  H={bpm_slit_open}")
+                print(f"\n  3a) Opening slits: V={bpm_slit_open}  H={bpm_slit_open}")
             _write_pv(slit_v, bpm_slit_open, f"slit_v → {bpm_slit_open}")
             _write_pv(slit_h, bpm_slit_open, f"slit_h → {bpm_slit_open}")
             time.sleep(5.0)
             if step_cb: step_cb("BPM open slits")
 
-            # ── j) X2 BPM zero scan (with tolerance-based refinement) ──────────
+            # ── 3b) X2 BPM zero scan (with tolerance-based refinement) ──────────
             x2_bpm_pos = float("nan")
             if _bpm_x_pv:
                 if not simulate:
@@ -3751,7 +3751,7 @@ def align_beamline(
 
                         _x2_step = bpm_x_search_step / (2 ** _pass)
                         if verbose:
-                            print(f"\n  j) X2 BPM scan  pass {_pass + 1}  "
+                            print(f"\n  3b) X2 BPM scan  pass {_pass + 1}  "
                                   f"(step={_x2_step:.4g} μm, max={bpm_max_steps}, "
                                   f"tol={bpm_x_tolerance} μm)")
                         x2_bpm_tgt, _ok_x, _ = _bpm_zero_scan(
@@ -3783,16 +3783,16 @@ def align_beamline(
                                           f"tol={bpm_x_tolerance} μm — refining")
                 else:
                     if verbose:
-                        print(f"\n  j) [SIM] X2 BPM scan skipped")
+                        print(f"\n  3b) [SIM] X2 BPM scan skipped")
                     x2_bpm_pos = record.get("X2", float("nan"))
                     if bpm_data_cb:
                         bpm_data_cb("X2", [x2_bpm_pos], [0.0], x2_bpm_pos, 0)
                 if step_cb: step_cb("X2 BPM scan")
 
-            # ── k) BRG2 fine rescan ────────────────────────────────────────────
+            # ── 3c) BRG2 fine rescan ────────────────────────────────────────────
             brg2_bpm_pos = float("nan")
             if verbose:
-                print(f"\n  k) BRG2 BPM fine rescan")
+                print(f"\n  3c) BRG2 BPM fine rescan")
             if not simulate:
                 if r_brg2 is not None and r_brg2.sigma and not np.isnan(r_brg2.sigma):
                     _half = fine_sigma_range * r_brg2.sigma
@@ -3825,7 +3825,7 @@ def align_beamline(
                     print(f"    [SIM] BRG2 BPM rescan skipped")
             if step_cb: step_cb("BRG2 BPM rescan")
 
-            # ── l) Roll2 BPM zero scan (with tolerance-based refinement) ────────
+            # ── 3d) Roll2 BPM zero scan (with tolerance-based refinement) ────────
             roll2_bpm_pos = float("nan")
             if _bpm_y_pv:
                 if not simulate:
@@ -3842,7 +3842,7 @@ def align_beamline(
 
                         _r2_step = bpm_y_search_step / (2 ** _pass)
                         if verbose:
-                            print(f"\n  l) Roll2 BPM scan  pass {_pass + 1}  "
+                            print(f"\n  3d) Roll2 BPM scan  pass {_pass + 1}  "
                                   f"(step={_r2_step:.4g} mdeg, max={bpm_max_steps}, "
                                   f"tol={bpm_y_tolerance} μm)")
                         roll2_bpm_tgt, _ok_y, _ = _bpm_zero_scan(
@@ -3875,35 +3875,37 @@ def align_beamline(
                                           f"tol={bpm_y_tolerance} μm — refining")
                 else:
                     if verbose:
-                        print(f"\n  l) [SIM] Roll2 BPM scan skipped")
+                        print(f"\n  3d) [SIM] Roll2 BPM scan skipped")
                     roll2_bpm_pos = record.get("Roll2", float("nan"))
                     if bpm_data_cb:
                         bpm_data_cb("Roll2", [roll2_bpm_pos], [0.0], roll2_bpm_pos, 0)
                 if step_cb: step_cb("Roll2 BPM scan")
 
-            # ── m) Record BPM results ──────────────────────────────────────────
+            # ── 3e) Record BPM results ──────────────────────────────────────────
             record["X2_bpm"]    = x2_bpm_pos
             record["Roll2_bpm"] = roll2_bpm_pos
             record["BRG2_bpm"]  = brg2_bpm_pos
             if verbose:
-                print(f"\n  m) BPM results:  "
+                print(f"\n  3e) BPM results:  "
                       f"X2_bpm={x2_bpm_pos:.4g}  "
                       f"Roll2_bpm={roll2_bpm_pos:.4g}  "
                       f"BRG2_bpm={brg2_bpm_pos:.4g}")
             if step_cb: step_cb("Record BPM results")
 
-            # ── n) Slit V center scan ──────────────────────────────────────────
+            # ── 3f) Slit V center scan ──────────────────────────────────────────
             _slit_v_center = str(slit_v_center_pv or "").strip()
             if _slit_v_center:
                 _sv_top = str(slit_v_top_pv or "").strip()
                 _sv_bot = str(slit_v_bot_pv or "").strip()
                 if verbose:
-                    print(f"\n  n) Slit V center scan  "
+                    print(f"\n  3f) Slit V center scan  "
                           f"[{bpm_slit_v_start:+g} … {bpm_slit_v_stop:+g}  "
                           f"{bpm_slit_v_nsteps} steps]  gap={bpm_slit_v_gap} mm")
                 if not simulate:
                     _write_pv(slit_v, bpm_slit_v_gap,
                               f"slit_v → {bpm_slit_v_gap} mm (slit V scan)")
+                    _write_pv(slit_h, bpm_slit_open,
+                              f"slit_h → {bpm_slit_open} mm (open during slit V scan)")
                     time.sleep(settle)
                 cur_center = _read_pv(_slit_v_center) if not simulate else 0.0
                 r_slit_v = _slit_center_scan(
@@ -3931,18 +3933,20 @@ def align_beamline(
                         record["slit_v_bot_bpm"] = _read_pv(_sv_bot + ".RBV")
                 if step_cb: step_cb("Slit V scan")
 
-            # ── o) Slit H center scan ──────────────────────────────────────────
+            # ── 3g) Slit H center scan ──────────────────────────────────────────
             _slit_h_center = str(slit_h_center_pv or "").strip()
             if _slit_h_center:
                 _sh_left  = str(slit_h_left_pv  or "").strip()
                 _sh_right = str(slit_h_right_pv or "").strip()
                 if verbose:
-                    print(f"\n  o) Slit H center scan  "
+                    print(f"\n  3g) Slit H center scan  "
                           f"[{bpm_slit_h_start:+g} … {bpm_slit_h_stop:+g}  "
                           f"{bpm_slit_h_nsteps} steps]  gap={bpm_slit_h_gap} mm")
                 if not simulate:
                     _write_pv(slit_h, bpm_slit_h_gap,
                               f"slit_h → {bpm_slit_h_gap} mm (slit H scan)")
+                    _write_pv(slit_v, bpm_slit_open,
+                              f"slit_v → {bpm_slit_open} mm (open during slit H scan)")
                     time.sleep(settle)
                 cur_center_h = _read_pv(_slit_h_center) if not simulate else 0.0
                 r_slit_h = _slit_center_scan(

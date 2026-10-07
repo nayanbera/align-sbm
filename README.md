@@ -268,34 +268,36 @@ For each selected energy row `align_beamline()` runs these steps:
 
 | Step | Action |
 |---|---|
-| a | Open slits to configured open positions |
-| b | Home pitch piezo |
-| c | `smart_scan` BRG2 → move to peak |
-| d | `fly_scan` pitch → move to peak |
-| e | Close vertical slit |
-| f | `smart_scan` Roll2 → move to centroid |
-| f2 | `fly_scan` pitch (repeat) |
-| g-pre | Close horizontal slit |
-| g | `smart_scan` X2 → move to centroid |
-| h | Record RBVs; update Energy Table (Roll2, X2, timestamp); write CSV if BPM disabled |
+| 1a | Open slits to configured open positions |
+| 1b | Home pitch piezo |
+| 1c | `smart_scan` BRG2 → move to peak |
+| 1d | `fly_scan` pitch → move to peak |
+| 1e | Close vertical slit |
+| 1f | `smart_scan` Roll2 → move to centroid |
+| 1f2 | `fly_scan` pitch (repeat) |
+| 1g-pre | Close horizontal slit |
+| 1g | `smart_scan` X2 → move to centroid |
+| 1h | Record RBVs; update Energy Table (Roll2, X2, timestamp); write CSV if BPM disabled |
 
 Roll1 is moved to the table value at the energy-change step (before scanning) when a Roll1 motor is configured.
 
 ### Optional BPM position alignment phase
 
-When **Enable BPM alignment** is checked on the Alignment tab, these additional steps run after step h:
+When **Enable BPM alignment** is checked on the Alignment tab, these additional steps run after step 1h:
 
 | Step | Action |
 |---|---|
-| i | Open slits to `bpm_slit_open` × `bpm_slit_open` (default 10 × 10 mm) |
-| j | Walk X2 in steps of `X2 step (μm)` until BPMX crosses zero; move X2 to interpolated zero position |
-| k | Fine BRG2 rescan (±`fine_sigma_range` × σ from step c) → move to peak |
-| l | Walk Roll2 in steps of `Roll2 step (mdeg)` until BPMY crosses zero; move Roll2 to interpolated zero position |
-| m | Record BPM RBVs; write one combined CSV row |
+| 3a | Open slits to `bpm_slit_open` × `bpm_slit_open` (default 10 × 10 mm) |
+| 3b | Walk X2 in steps of `X2 step (μm)` until BPMX crosses zero; move X2 to interpolated zero position |
+| 3c | Fine BRG2 rescan (±`fine_sigma_range` × σ from step 1c) → move to peak |
+| 3d | Walk Roll2 in steps of `Roll2 step (mdeg)` until BPMY crosses zero; move Roll2 to interpolated zero position |
+| 3e | Record BPM RBVs; write one combined CSV row |
+| 3f | Slit V center scan: horizontal slit opened to `bpm_slit_open`, vertical slit set to the Slit V gap; only runs if a Slit V center PV is set |
+| 3g | Slit H center scan: vertical slit opened to `bpm_slit_open`, horizontal slit set to the Slit H gap; only runs if a Slit H center PV is set |
 
 **Zero-crossing algorithm:** The motor walks in a fixed direction (BPMX > 0 → X2 negative; BPMY < 0 → Roll2 negative) until the BPM signal changes sign, then linearly interpolates between the last two positions to find the exact zero crossing. Stops after `Max steps` without a sign change.
 
-**CSV columns added:** `X2_bpm`, `Roll2_bpm`, `BRG2_bpm` (existing rows backfilled with `0`). When BPM is enabled, the CSV write is deferred and only happens once after step m, combining both main-alignment and BPM results in a single row.
+**CSV columns added:** `X2_bpm`, `Roll2_bpm`, `BRG2_bpm` (existing rows backfilled with `0`). When BPM is enabled, the CSV write is deferred and only happens once after the BPM phase, combining both main-alignment and BPM results in a single row.
 
 **Setup:** Set `BPM X (BPMX)` and `BPM Y (BPMY)` readback PVs in **Setup → Motors & PVs → BPM Position Readbacks**. At least one BPM PV must be configured for the corresponding scan to run. If both are blank, the BPM phase opens the slits and rescans BRG2 only.
 
