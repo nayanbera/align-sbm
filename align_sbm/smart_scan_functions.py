@@ -2757,11 +2757,12 @@ def _slit_center_scan(
     verbose=True,
     simulate=False,
     scan_cb=None,
+    label="Slit-V",
 ):
     """Scan a virtual (plain read/write) slit center PV, using blade motor DMOV for settling.
 
     Uses the scan setpoint as the position axis (no blade-to-center coordinate transform needed).
-    Calls scan_cb("started", "Slit-V"), scan_cb("point", pos, sig),
+    Calls scan_cb("started", label), scan_cb("point", pos, sig),
     scan_cb("finished", result_dict) for live-plot integration.
     Returns a SimpleNamespace(status, center, positions, signals).
     """
@@ -2772,7 +2773,7 @@ def _slit_center_scan(
     rec_sig = []
 
     if scan_cb:
-        scan_cb("started", "Slit-V")
+        scan_cb("started", label)
 
     if not simulate and _EPICS_AVAILABLE:
         try:
@@ -2858,7 +2859,7 @@ def _slit_center_scan(
     # Move to peak if found
     if ok_status is ScanStatus.SUCCESS and not simulate and _EPICS_AVAILABLE:
         if verbose:
-            print(f"    Slit V peak at {center:.4g} — moving center PV")
+            print(f"    {label} peak at {center:.4g} — moving center PV")
         from epics import caget as _cg, caput as _cp
         _cp(center_pv, center, wait=True, timeout=5)
         time.sleep(0.1)
@@ -2976,6 +2977,13 @@ def align_beamline(
     bpm_slit_v_start    : float = -2.0,
     bpm_slit_v_stop     : float = 2.0,
     bpm_slit_v_nsteps   : int   = 21,
+    slit_h_center_pv    : str   = "",
+    slit_h_left_pv      : str   = "",
+    slit_h_right_pv     : str   = "",
+    bpm_slit_h_gap      : float = 0.1,
+    bpm_slit_h_start    : float = -2.0,
+    bpm_slit_h_stop     : float = 2.0,
+    bpm_slit_h_nsteps   : int   = 21,
     bpm_align_fn                 = None,
     bpm_motor_cal           : bool  = False,
     bpmx_motor              : str   = "",
@@ -3141,7 +3149,8 @@ def align_beamline(
         fieldnames += list(record_pvs.keys())
     if bpm_align:
         fieldnames += ["X2_bpm", "Roll2_bpm", "BRG2_bpm",
-                       "slit_v_center_bpm", "slit_v_top_bpm", "slit_v_bot_bpm"]
+                       "slit_v_center_bpm", "slit_v_top_bpm", "slit_v_bot_bpm",
+                       "slit_h_center_bpm", "slit_h_left_bpm", "slit_h_right_bpm"]
     _do_bpm_motor = bpm_motor_cal and bool(str(bpmx_motor or "").strip() or str(bpmy_motor or "").strip())
     if _do_bpm_motor:
         fieldnames += ["bpmmotor_x_pos", "bpmmotor_y_pos",
@@ -3544,6 +3553,9 @@ def align_beamline(
         record["slit_v_center_bpm"] = float("nan")
         record["slit_v_top_bpm"]   = float("nan")
         record["slit_v_bot_bpm"]   = float("nan")
+        record["slit_h_center_bpm"] = float("nan")
+        record["slit_h_left_bpm"]  = float("nan")
+        record["slit_h_right_bpm"] = float("nan")
         if _do_bpm_motor:
             record["bpmmotor_x_pos"] = float("nan")
             record["bpmmotor_y_pos"] = float("nan")
@@ -3918,6 +3930,46 @@ def align_beamline(
                     if _sv_bot:
                         record["slit_v_bot_bpm"] = _read_pv(_sv_bot + ".RBV")
                 if step_cb: step_cb("Slit V scan")
+
+            # ── o) Slit H center scan ──────────────────────────────────────────
+            _slit_h_center = str(slit_h_center_pv or "").strip()
+            if _slit_h_center:
+                _sh_left  = str(slit_h_left_pv  or "").strip()
+                _sh_right = str(slit_h_right_pv or "").strip()
+                if verbose:
+                    print(f"\n  o) Slit H center scan  "
+                          f"[{bpm_slit_h_start:+g} … {bpm_slit_h_stop:+g}  "
+                          f"{bpm_slit_h_nsteps} steps]  gap={bpm_slit_h_gap} mm")
+                if not simulate:
+                    _write_pv(slit_h, bpm_slit_h_gap,
+                              f"slit_h → {bpm_slit_h_gap} mm (slit H scan)")
+                    time.sleep(settle)
+                cur_center_h = _read_pv(_slit_h_center) if not simulate else 0.0
+                r_slit_h = _slit_center_scan(
+                    center_pv=_slit_h_center,
+                    detector_pv=detector,
+                    start=cur_center_h + bpm_slit_h_start,
+                    stop=cur_center_h + bpm_slit_h_stop,
+                    nsteps=int(bpm_slit_h_nsteps),
+                    top_pv=_sh_left,
+                    bot_pv=_sh_right,
+                    settle=settle,
+                    verbose=verbose,
+                    simulate=simulate,
+                    scan_cb=slit_scan_cb,
+                    label="Slit-H",
+                )
+                if verbose:
+                    cen_str = (f"{r_slit_h.center:.6g}"
+                               if r_slit_h.center is not None else "n/a")
+                    print(f"    Slit H: {r_slit_h.status.value}  peak={cen_str}")
+                if not simulate:
+                    record["slit_h_center_bpm"] = _read_pv(_slit_h_center)
+                    if _sh_left:
+                        record["slit_h_left_bpm"] = _read_pv(_sh_left + ".RBV")
+                    if _sh_right:
+                        record["slit_h_right_bpm"] = _read_pv(_sh_right + ".RBV")
+                if step_cb: step_cb("Slit H scan")
 
             record["datetime"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

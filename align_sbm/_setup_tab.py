@@ -50,6 +50,9 @@ _PV_DEFAULTS = {
     "slit_v_center_pv":   "",
     "slit_v_top_pv":      "",
     "slit_v_bot_pv":      "",
+    "slit_h_center_pv":   "",
+    "slit_h_left_pv":     "",
+    "slit_h_right_pv":    "",
 }
 
 _SCAN_DEFAULTS = {
@@ -100,6 +103,10 @@ _SCAN_DEFAULTS = {
     "bpm_slit_v_start":     -2.0,
     "bpm_slit_v_stop":       2.0,
     "bpm_slit_v_nsteps":    21,
+    "bpm_slit_h_gap":       0.1,
+    "bpm_slit_h_start":     -2.0,
+    "bpm_slit_h_stop":       2.0,
+    "bpm_slit_h_nsteps":    21,
     # BPM motor calibration phase
     "bpm_navg":                  10,
     "bpmmotor_x_search_step":    0.01,
@@ -286,7 +293,7 @@ class SetupTab(QWidget):
         # Slit V center motors (for BPM-phase slit scan)
         slitv_grp = QGroupBox("Slit V Center Motors  ·  current value →")
         slitv_grp.setToolTip(
-            "Motor PVs for the vertical slit center scan — the final step of the BPM alignment phase.\n"
+            "Motor PVs for the vertical slit center scan — step n of the BPM alignment phase.\n"
             "The center PV is the scan axis; top and bottom blade RBVs are recorded in the CSV."
         )
         slitvf = QFormLayout(slitv_grp)
@@ -300,6 +307,24 @@ class SetupTab(QWidget):
         ]:
             slitvf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
         vbox.addWidget(slitv_grp)
+
+        # Slit H center motors (for BPM-phase slit scan)
+        slith_grp = QGroupBox("Slit H Center Motors  ·  current value →")
+        slith_grp.setToolTip(
+            "Motor PVs for the horizontal slit center scan — step o of the BPM alignment phase.\n"
+            "The center PV is the scan axis; left and right blade RBVs are recorded in the CSV."
+        )
+        slithf = QFormLayout(slith_grp)
+        for key, label, tip in [
+            ("slit_h_center_pv", "Slit H center",
+             "Virtual center motor PV — this is the axis that is moved during the slit H scan."),
+            ("slit_h_left_pv",   "Slit H left blade",
+             "Left blade motor PV — RBV is recorded in the CSV after the slit H scan."),
+            ("slit_h_right_pv",  "Slit H right blade",
+             "Right blade motor PV — RBV is recorded in the CSV after the slit H scan."),
+        ]:
+            slithf.addRow(label + ":", _pv_row(key, _PV_DEFAULTS[key], tip))
+        vbox.addWidget(slith_grp)
 
         # ── Pre / Post energy change PVs ────────────────────────────────────
         energy_pvs_grp = QGroupBox("Energy Change PVs")
@@ -654,6 +679,29 @@ class SetupTab(QWidget):
         self._scan_widgets["bpm_slit_v_nsteps"] = w
         bpmsf.addRow("Slit V steps:", w)
 
+        bpmsf.addRow(QLabel(""))
+        bpmsf.addRow(QLabel("<b>Slit H center scan</b>"))
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_slit_h_gap"], lo=0.001, hi=100.0, decimals=3, step=0.01)
+        w.setToolTip("Fixed horizontal slit gap (mm) held during the slit center scan")
+        self._scan_widgets["bpm_slit_h_gap"] = w
+        bpmsf.addRow("Slit H gap (mm):", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_slit_h_start"], lo=-100.0, hi=0.0, decimals=3, step=0.1)
+        w.setToolTip("Scan start offset (mm) relative to current slit center position")
+        self._scan_widgets["bpm_slit_h_start"] = w
+        bpmsf.addRow("Slit H start (mm):", w)
+
+        w = _dbl(_SCAN_DEFAULTS["bpm_slit_h_stop"], lo=0.0, hi=100.0, decimals=3, step=0.1)
+        w.setToolTip("Scan stop offset (mm) relative to current slit center position")
+        self._scan_widgets["bpm_slit_h_stop"] = w
+        bpmsf.addRow("Slit H stop (mm):", w)
+
+        w = _int(_SCAN_DEFAULTS["bpm_slit_h_nsteps"], lo=3, hi=500)
+        w.setToolTip("Number of scan points for the slit H center scan")
+        self._scan_widgets["bpm_slit_h_nsteps"] = w
+        bpmsf.addRow("Slit H steps:", w)
+
         vbox.addWidget(bpm_scan_grp)
 
         bpmcal_grp = QGroupBox("BPM Position Calibration Parameters")
@@ -868,6 +916,7 @@ class SetupTab(QWidget):
         pv_map = {}
         for key in ("brg2", "roll1_motor", "roll2_motor", "x2_motor",
                     "slit_v_top_pv", "slit_v_bot_pv",
+                    "slit_h_left_pv", "slit_h_right_pv",
                     "bpmx_motor", "bpmy_motor"):
             pv = self._pv_widgets[key].text().strip()
             if pv:
@@ -875,7 +924,7 @@ class SetupTab(QWidget):
         for key in ("detector", "monitor_pv", "pitch_pv", "slit_v_pv", "slit_h_pv",
                     "mono_e_pv", "harmonic_pv", "und_e_pv", "und_start_pv",
                     "roll2_energy_pv", "x2_energy_pv",
-                    "bpm_x_pv", "bpm_y_pv", "slit_v_center_pv",
+                    "bpm_x_pv", "bpm_y_pv", "slit_v_center_pv", "slit_h_center_pv",
                     "scale_x_pv", "scale_y_pv"):
             pv = self._pv_widgets[key].text().strip()
             if pv:

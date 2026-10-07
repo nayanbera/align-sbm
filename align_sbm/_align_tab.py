@@ -21,7 +21,7 @@ try:
 except ImportError:
     _PG = False
 
-_MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2", "Slit-V"]
+_MOTOR_TABS = ["BRG2", "Pitch", "Roll2", "X2", "Slit-V", "Slit-H"]
 
 
 class _SortableItem(QTableWidgetItem):
@@ -766,6 +766,13 @@ class AlignTab(QWidget):
         # Push setup-tab changes to the running worker between rows
         self._setup_tab.config_changed.connect(self._on_setup_changed)
 
+        # Step tooltips highlight the steps that will actually run
+        self._setup_tab.config_changed.connect(self._update_step_tooltips)
+        for _key in ("bpm_x_pv", "bpm_y_pv", "bpmx_motor", "bpmy_motor", "scale_x_pv",
+                     "scale_y_pv", "slit_v_center_pv", "slit_h_center_pv"):
+            self._setup_tab._pv_widgets[_key].textChanged.connect(self._update_step_tooltips)
+        self._update_step_tooltips()
+
         # Keep energy row list in sync with the energy table and crystal status
         self._energy_tab.rows_changed.connect(self._refresh_row_list)
         self._crystal_widget.mappings_changed.connect(self._refresh_row_list)
@@ -902,36 +909,14 @@ class AlignTab(QWidget):
 
         self._beam_align_cb = QCheckBox("Enable Beam Alignment")
         self._beam_align_cb.setChecked(True)
-        self._beam_align_cb.setToolTip(
-            "Run the main beam alignment sequence (BRG2, Pitch, Roll2, X2 scans).\n"
-            "When unchecked, the current motor RBVs are read and saved to CSV instead."
-        )
         rv.addWidget(self._beam_align_cb)
 
         self._bpm_cal_cb = QCheckBox("Enable Beam Position Calibration")
         self._bpm_cal_cb.setChecked(False)
-        self._bpm_cal_cb.setToolTip(
-            "Run BPM motor centering and scale calibration after the X2 scan:\n"
-            "  o)  Walk BPM-X motor until BPM X crosses zero\n"
-            "  p)  Walk BPM-Y motor until BPM Y crosses zero\n"
-            "  q)  Calibrate BPM X scale factor (move 0.1 mm, measure, compute new_scale_x)\n"
-            "  r)  Calibrate BPM Y scale factor\n"
-            "  s)  Move both motors to 0, record abpmx / abpmy\n\n"
-            "Requires BPM Motor PVs to be set in Setup → Motors && PVs."
-        )
         rv.addWidget(self._bpm_cal_cb)
 
         self._bpm_cb = QCheckBox("Enable BPM alignment")
         self._bpm_cb.setChecked(False)
-        self._bpm_cb.setToolTip(
-            "Run an additional BPM position alignment phase after each energy row:\n"
-            "  i)  Open slits (size set in Setup → Scan Parameters → BPM Alignment)\n"
-            "  j)  Walk X2 until BPMX crosses zero\n"
-            "  k)  Fine BRG2 rescan\n"
-            "  l)  Walk Roll2 until BPMY crosses zero\n"
-            "  m)  Write combined CSV row (adds X2_bpm, Roll2_bpm, BRG2_bpm columns)\n\n"
-            "Requires BPM X / Y PVs to be set in Setup → Motors && PVs."
-        )
         self._bpm_cb.toggled.connect(self._on_bpm_toggled)
         rv.addWidget(self._bpm_cb)
 
@@ -2531,6 +2516,73 @@ class AlignTab(QWidget):
             self._status_lbl.setText(
                 f"Settings updated — will apply at the next energy row"
             )
+
+    @staticmethod
+    def _steps_tooltip(header: str, steps, footer: str = "") -> str:
+        """Rich-text tooltip listing (tag, text, enabled) steps — enabled in green, others gray."""
+        green, gray = "#2e9e44", "#888888"
+        lines = [
+            f'<span style="color:{green if on else gray};"><b>{tag}</b>&nbsp;{text}</span>'
+            for tag, text, on in steps
+        ]
+        return (
+            f"<html>{header}<br>" + "<br>".join(lines)
+            + f'<br><br>Steps in <span style="color:{green};">green</span> will run; '
+              f'<span style="color:{gray};">gray</span> steps are disabled or not configured.'
+            + (f"<br>{footer}" if footer else "") + "</html>"
+        )
+
+    def _update_step_tooltips(self):
+        """Rebuild the Beam Alignment / Position Calibration / BPM alignment tooltips."""
+        st = self._setup_tab
+        pv = lambda key: bool(st._pv_widgets[key].text().strip())
+        w = st._scan_widgets.get("do_pitch_scan")
+        pitch_on = w.isChecked() if w is not None else True
+
+        self._beam_align_cb.setToolTip(self._steps_tooltip(
+            "Run the main beam alignment sequence (BRG2, Pitch, Roll2, X2 scans):",
+            [
+                ("a)",  "Open slits",                                     True),
+                ("b)",  "Home pitch piezo",                               True),
+                ("c)",  "BRG2 smart scan → move to peak",                 True),
+                ("d)",  "Pitch fly scan",                                 pitch_on),
+                ("e)",  "Close vertical slit",                            True),
+                ("f)",  "Roll2 smart scan → move to centroid",            True),
+                ("f2)", "Pitch fly scan (repeat)",                        pitch_on),
+                ("g)",  "Close horizontal slit, then X2 smart scan → move to centroid", True),
+                ("h)",  "Read final RBVs and write CSV row",              True),
+            ],
+            "When unchecked, the current motor RBVs are read and saved to CSV instead.",
+        ))
+
+        x_mot, y_mot = pv("bpmx_motor"), pv("bpmy_motor")
+        x_pv,  y_pv  = pv("bpm_x_pv"),   pv("bpm_y_pv")
+        self._bpm_cal_cb.setToolTip(self._steps_tooltip(
+            "Run BPM motor centering and scale calibration after the main alignment (step h):",
+            [
+                ("o)", "Walk BPM-X motor until BPM X crosses zero",                x_mot and x_pv),
+                ("p)", "Walk BPM-Y motor until BPM Y crosses zero",                y_mot and y_pv),
+                ("q)", "Calibrate BPM X scale factor (move 0.1 mm, measure, compute new_scale_x)",
+                                                                                   x_mot and x_pv and pv("scale_x_pv")),
+                ("r)", "Calibrate BPM Y scale factor",                             y_mot and y_pv and pv("scale_y_pv")),
+                ("s)", "Move both motors to 0, record abpmx / abpmy",              x_mot or y_mot),
+            ],
+            "Requires BPM Motor PVs to be set in Setup → Motors &amp; PVs.",
+        ))
+
+        self._bpm_cb.setToolTip(self._steps_tooltip(
+            "Run an additional BPM position alignment phase after each energy row:",
+            [
+                ("i)", "Open slits (size set in Setup → Scan Parameters → BPM Alignment)", True),
+                ("j)", "Walk X2 until BPMX crosses zero",                         x_pv),
+                ("k)", "Fine BRG2 rescan",                                        True),
+                ("l)", "Walk Roll2 until BPMY crosses zero",                      y_pv),
+                ("m)", "Record BPM results (adds X2_bpm, Roll2_bpm, BRG2_bpm columns)", True),
+                ("n)", "Slit V center scan (needs Slit V center PV)",             pv("slit_v_center_pv")),
+                ("o)", "Slit H center scan (needs Slit H center PV)",             pv("slit_h_center_pv")),
+            ],
+            "Requires BPM X / Y PVs to be set in Setup → Motors &amp; PVs.",
+        ))
 
     def _on_bpm_toggled(self, checked: bool):
         """Push BPM alignment toggle to the running worker — mid-row and between rows."""

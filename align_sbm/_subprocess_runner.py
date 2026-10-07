@@ -69,6 +69,7 @@ def run_alignment_row(q, row, kwargs, simulate, bpm_flag=None):
         kwargs.get("roll2_motor",      ""): "Roll2",
         kwargs.get("x2_motor",         ""): "X2",
         kwargs.get("slit_v_center_pv", ""): "Slit-V",
+        kwargs.get("slit_h_center_pv", ""): "Slit-H",
     }
 
     def _tab_for(motor):
@@ -144,10 +145,12 @@ def run_alignment_row(q, row, kwargs, simulate, bpm_flag=None):
     _bpm_x_pv        = str(kwargs.get("bpm_x_pv")        or "").strip()
     _bpm_y_pv        = str(kwargs.get("bpm_y_pv")        or "").strip()
     _slit_v_ctr_pv   = str(kwargs.get("slit_v_center_pv") or "").strip()
+    _slit_h_ctr_pv   = str(kwargs.get("slit_h_center_pv") or "").strip()
     bpm_steps   = (3
                    + (1 if _bpm_x_pv      else 0)
                    + (1 if _bpm_y_pv      else 0)
                    + (1 if _slit_v_ctr_pv else 0)
+                   + (1 if _slit_h_ctr_pv else 0)
                   ) if kwargs.get("bpm_align") else 0
     _bpmx_mot = str(kwargs.get("bpmx_motor") or "").strip()
     _bpmy_mot = str(kwargs.get("bpmy_motor") or "").strip()
@@ -185,7 +188,7 @@ def run_alignment_row(q, row, kwargs, simulate, bpm_flag=None):
 
     def _slit_scan_cb(event, *args):
         if event == "started":
-            q.put(("scan_started", args[0]))   # args[0] == "Slit-V"
+            q.put(("scan_started", args[0]))   # args[0] == "Slit-V" or "Slit-H"
         elif event == "point":
             q.put(("point", float(args[0]), float(args[1])))
         elif event == "finished":
