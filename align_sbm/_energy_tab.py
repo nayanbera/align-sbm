@@ -44,6 +44,7 @@ class EnergyTab(QWidget):
         self._settings          = settings
         self._auto_fill_fn      = None   # callable() → {"crystal": str, "roll1": str}
         self._crystal_color_fn  = None   # callable(crystal_name) → hex color str or ""
+        self._crystal_label_fn  = None   # callable(raw energyMode value) → crystal label or ""
         self._build_ui()
         self._load_settings()
 
@@ -99,6 +100,16 @@ class EnergyTab(QWidget):
         )
         predict_btn.clicked.connect(self._predict_from_csv)
         btn_row.addWidget(predict_btn)
+        update_btn = QPushButton("Update from CSV")
+        update_btn.setToolTip(
+            "Set Roll2 / X2 of every row to the most recent record in the alignment CSV\n"
+            "with the same MonoE and crystal.\n"
+            "The crystal of a CSV record comes from its 'energyMode' column (via the Crystal\n"
+            "mappings). If that is unavailable the record matches only when no other row has\n"
+            "the same MonoE. Records with nan Roll2/X2 are ignored."
+        )
+        update_btn.clicked.connect(self._update_from_csv)
+        btn_row.addWidget(update_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -107,6 +118,10 @@ class EnergyTab(QWidget):
     def set_auto_fill_fn(self, fn):
         """Set a callable invoked when Add Row is clicked: fn() → {"crystal": str, "roll1": str}."""
         self._auto_fill_fn = fn
+
+    def set_crystal_label_fn(self, fn):
+        """Set fn(raw_energy_mode_value) → crystal label, used to identify the crystal of CSV rows."""
+        self._crystal_label_fn = fn
 
     def set_crystal_color_fn(self, fn):
         """Set a callable fn(crystal_name) → hex color str used to color table rows."""
@@ -398,6 +413,137 @@ class EnergyTab(QWidget):
                     writer.writerow(dict(zip(_KEYS, row)))
         except Exception as e:
             QMessageBox.critical(self, "Save CSV", str(e))
+
+    def compute_csv_updates(self, csv_path: str):
+        """Match every table row to its most recent CSV record (same MonoE and crystal).
+
+        Returns (updates, no_match, ambiguous) where *updates* is a list of
+        (table_row, roll2, x2, datetime_str); *no_match* / *ambiguous* are lists of table rows.
+        """
+        import math
+        from datetime import datetime
+
+        with open(csv_path, newline="") as f:
+            records = list(csv.DictReader(f))
+
+        def _f(v):
+            try:
+                x = float(v)
+                return x if math.isfinite(x) else None
+            except (TypeError, ValueError):
+                return None
+
+        recs = []   # (sort_key, mono, crystal-or-None, roll2, x2, dt_str)
+        for i, rec in enumerate(records):
+            mono, roll2, x2 = _f(rec.get("MonoE")), _f(rec.get("Roll2")), _f(rec.get("X2"))
+            if mono is None or roll2 is None or x2 is None:
+                continue
+            dt_str = (rec.get("datetime") or "").strip()
+            try:
+                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                dt = datetime.min
+            crystal = None
+            raw = (rec.get("energyMode") or "").strip()
+            if raw and self._crystal_label_fn is not None:
+                crystal = self._crystal_label_fn(raw) or None
+            recs.append(((dt, i), mono, crystal, roll2, x2, dt_str))
+        recs.sort(key=lambda r: r[0])   # oldest → newest
+
+        table_rows = []   # (table_row, mono, crystal)
+        for r in range(self._table.rowCount()):
+            item = self._table.item(r, 0)
+            try:
+                mono = float(item.text().strip())
+            except (AttributeError, ValueError):
+                continue
+            c_item = self._table.item(r, _CRYSTAL_COL)
+            table_rows.append((r, mono, c_item.text().strip() if c_item else ""))
+
+        updates, no_match, ambiguous = [], [], []
+        for r, mono, crystal in table_rows:
+            shared = sum(1 for _, m, _c in table_rows if abs(m - mono) < 0.001) > 1
+            best = None
+            seen_unknown_blocked = False
+            for rec in recs:   # ascending → last acceptable wins
+                if abs(rec[1] - mono) >= 0.001:
+                    continue
+                rec_cry = rec[2]
+                if rec_cry is not None:
+                    ok = (not crystal) or rec_cry == crystal
+                else:
+                    ok = not shared
+                    if not ok:
+                        seen_unknown_blocked = True
+                if ok:
+                    best = rec
+            if best is not None:
+                updates.append((r, best[3], best[4], best[5]))
+            elif seen_unknown_blocked:
+                ambiguous.append(r)
+            else:
+                no_match.append(r)
+        return updates, no_match, ambiguous
+
+    def _update_from_csv(self):
+        import os
+        csv_path = self._settings.value("last_csv_path", "") if self._settings else ""
+        if not csv_path or not os.path.isfile(csv_path):
+            QMessageBox.warning(self, "Update from CSV",
+                                "No alignment CSV is open.\n"
+                                "Use 'Open CSV…' in the Alignment tab first.")
+            return
+        try:
+            updates, no_match, ambiguous = self.compute_csv_updates(csv_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Update from CSV", f"Could not read CSV:\n{e}")
+            return
+        if not updates:
+            QMessageBox.information(
+                self, "Update from CSV",
+                "No table rows have a matching record in the CSV.\n"
+                + (f"{len(ambiguous)} row(s) were skipped because their crystal could not be "
+                   "determined from the CSV." if ambiguous else ""))
+            return
+        reply = QMessageBox.question(
+            self, "Update from CSV",
+            f"Overwrite Roll2 / X2 of {len(updates)} of {self._table.rowCount()} row(s) "
+            f"with the most recent matching record in:\n{csv_path}\n\n"
+            f"No matching record: {len(no_match)} row(s)\n"
+            f"Crystal ambiguous (skipped): {len(ambiguous)} row(s)\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._table.setSortingEnabled(False)
+        self._table.blockSignals(True)
+        try:
+            for r, roll2, x2, dt_str in updates:
+                for col, text in [(3, f"{roll2:.6g}"), (4, f"{x2:.6g}")]:
+                    cell = self._table.item(r, col)
+                    if cell is None:
+                        cell = _NumericItem()
+                        cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self._table.setItem(r, col, cell)
+                    cell.setText(text)
+                if dt_str:
+                    ts_item = self._table.item(r, _UPDATED_COL)
+                    if ts_item is None:
+                        ts_item = QTableWidgetItem()
+                        ts_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                        ts_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        self._table.setItem(r, _UPDATED_COL, ts_item)
+                    ts_item.setText(dt_str)
+        finally:
+            self._table.blockSignals(False)
+            self._table.setSortingEnabled(True)
+            self.rows_changed.emit()
+        QMessageBox.information(
+            self, "Update from CSV",
+            f"Updated {len(updates)} row(s).  No match: {len(no_match)}.  "
+            f"Ambiguous crystal: {len(ambiguous)}.")
 
     def _predict_from_csv(self):
         from ._predict_dialog import PredictDialog

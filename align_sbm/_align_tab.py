@@ -837,6 +837,25 @@ class _CrystalStatusWidget(QWidget):
                 return m.get("color", "")
         return ""
 
+    def label_for_raw_value(self, raw_value: str) -> str:
+        """Return the crystal display label for a raw PV value (e.g. energyMode), or ''."""
+        rv = str(raw_value).strip()
+        try:
+            rv_float = float(rv)
+        except ValueError:
+            rv_float = None
+        for m in self._mappings:
+            stored = m.get("raw", "").strip()
+            if stored == rv:
+                return m.get("label", "").strip()
+            if rv_float is not None:
+                try:
+                    if float(stored) == rv_float:
+                        return m.get("label", "").strip()
+                except ValueError:
+                    pass
+        return ""
+
     def color_for_raw_value(self, raw_value: str) -> str:
         """Return the hex color for a raw PV value (e.g. from energyMode CSV column), or ''."""
         rv = raw_value.strip()
@@ -973,6 +992,7 @@ class AlignTab(QWidget):
 
         # Auto-fill Roll1 + Crystal when a new energy row is added
         self._energy_tab.set_auto_fill_fn(self._energy_auto_fill)
+        self._energy_tab.set_crystal_label_fn(self._crystal_widget.label_for_raw_value)
 
     def _build_ui(self):
         root = QHBoxLayout(self)
