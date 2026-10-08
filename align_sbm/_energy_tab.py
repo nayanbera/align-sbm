@@ -201,9 +201,11 @@ class EnergyTab(QWidget):
         return labels
 
     def update_row_after_alignment(self, mono_e: float, roll2: float, x2: float,
-                                   timestamp_str: str) -> bool:
+                                   timestamp_str: str, crystal=None) -> bool:
         """Update Roll2, X2, and the Updated timestamp for the row matching mono_e.
 
+        If *crystal* is not None the row's Crystal cell must also match (blank matches
+        blank), so rows sharing a MonoE but using different crystals are kept apart.
         Returns True if a matching row was found and updated.
         """
         matched = False
@@ -219,6 +221,10 @@ class EnergyTab(QWidget):
                 except ValueError:
                     continue
                 if abs(row_mono_e - mono_e) < 0.001:
+                    if crystal is not None:
+                        c_item = self._table.item(r, _CRYSTAL_COL)
+                        if (c_item.text().strip() if c_item else "") != crystal.strip():
+                            continue
                     for col, text in [(3, f"{roll2:.6g}"), (4, f"{x2:.6g}")]:
                         cell = self._table.item(r, col)
                         if cell is None:

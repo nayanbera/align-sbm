@@ -2230,6 +2230,21 @@ class AlignTab(QWidget):
         self._per_e_repeat = per_e
         expanded = [row for row in rows for _ in range(per_e)]
 
+        # Remember each row's crystal now (same order as `expanded`) so the energy table
+        # update can match MonoE *and* crystal even if the table is edited/sorted mid-run.
+        all_crystals = self._energy_tab.get_row_crystals()
+        sel_idx = [
+            self._row_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._row_list.count())
+            if self._row_list.item(i).isSelected()
+        ]
+        sel_idx = [i for i in sel_idx if i < len(self._energy_tab.get_table())]
+        self._loop_row_crystals = [
+            all_crystals[i] if i < len(all_crystals) else ""
+            for i in sel_idx for _ in range(per_e)
+        ]
+        self._current_row_idx = 0
+
         # Loop state
         self._loop_active   = self._loop_cb.isChecked()
         self._loop_abort    = False
@@ -2413,6 +2428,7 @@ class AlignTab(QWidget):
         self.status_message.emit(f"{label}…")
 
     def _on_row_started(self, row_idx: int):
+        self._current_row_idx = row_idx
         per_e    = max(1, getattr(self, '_per_e_repeat', 1))
         list_idx = row_idx // per_e
         from PyQt6.QtGui import QBrush, QColor
@@ -2470,13 +2486,19 @@ class AlignTab(QWidget):
         else:
             from datetime import datetime
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if self._energy_tab.update_row_after_alignment(float(mono_e), float(roll2), float(x2), ts):
-                note = (f"Energy table updated: MonoE={float(mono_e):.6g} keV  "
+            crystals = getattr(self, "_loop_row_crystals", [])
+            idx      = getattr(self, "_current_row_idx", 0)
+            crystal  = crystals[idx] if 0 <= idx < len(crystals) else None
+            c_txt    = f"  Crystal={crystal}" if crystal else ""
+            if self._energy_tab.update_row_after_alignment(
+                    float(mono_e), float(roll2), float(x2), ts, crystal=crystal):
+                note = (f"Energy table updated: MonoE={float(mono_e):.6g} keV{c_txt}  "
                         f"Roll2={float(roll2):.6g}  X2={float(x2):.6g}")
                 if float(roll2) != float(roll2) or float(x2) != float(x2):
                     note += "  (nan — position readback failed)"
             else:
-                note = f"Energy table NOT updated: no row with MonoE={float(mono_e):.6g} keV"
+                note = (f"Energy table NOT updated: no row with "
+                        f"MonoE={float(mono_e):.6g} keV{c_txt}")
         self._log.appendPlainText(f"  → {note}")
 
     def _on_scan_started(self, tab_name: str):
