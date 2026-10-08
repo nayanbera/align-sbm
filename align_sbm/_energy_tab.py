@@ -201,8 +201,12 @@ class EnergyTab(QWidget):
         return labels
 
     def update_row_after_alignment(self, mono_e: float, roll2: float, x2: float,
-                                   timestamp_str: str):
-        """Update Roll2, X2, and the Updated timestamp for the row matching mono_e."""
+                                   timestamp_str: str) -> bool:
+        """Update Roll2, X2, and the Updated timestamp for the row matching mono_e.
+
+        Returns True if a matching row was found and updated.
+        """
+        matched = False
         self._table.setSortingEnabled(False)
         self._table.blockSignals(True)
         try:
@@ -229,11 +233,13 @@ class EnergyTab(QWidget):
                         ts_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                         self._table.setItem(r, _UPDATED_COL, ts_item)
                     ts_item.setText(timestamp_str)
+                    matched = True
                     break
         finally:
             self._table.blockSignals(False)
             self._table.setSortingEnabled(True)
             self.rows_changed.emit()
+        return matched
 
     def reload_settings(self):
         self._load_settings()

@@ -2463,11 +2463,21 @@ class AlignTab(QWidget):
         mono_e = record.get("MonoE")
         roll2  = record.get("Roll2")
         x2     = record.get("X2")
-        if (not self._loop_simulate
-                and mono_e is not None and roll2 is not None and x2 is not None):
+        if self._loop_simulate:
+            note = "Energy table not updated (simulation mode)"
+        elif mono_e is None or roll2 is None or x2 is None:
+            note = "Energy table not updated (record has no MonoE/Roll2/X2)"
+        else:
             from datetime import datetime
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self._energy_tab.update_row_after_alignment(float(mono_e), float(roll2), float(x2), ts)
+            if self._energy_tab.update_row_after_alignment(float(mono_e), float(roll2), float(x2), ts):
+                note = (f"Energy table updated: MonoE={float(mono_e):.6g} keV  "
+                        f"Roll2={float(roll2):.6g}  X2={float(x2):.6g}")
+                if float(roll2) != float(roll2) or float(x2) != float(x2):
+                    note += "  (nan — position readback failed)"
+            else:
+                note = f"Energy table NOT updated: no row with MonoE={float(mono_e):.6g} keV"
+        self._log.appendPlainText(f"  → {note}")
 
     def _on_scan_started(self, tab_name: str):
         """Switch to the named motor tab and clear its plot for a new scan."""
